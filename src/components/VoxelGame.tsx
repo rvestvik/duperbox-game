@@ -24,6 +24,7 @@ export default function VoxelGame() {
 
   const activeColorRef = useRef(0);
   const voxelCountRef = useRef(0);
+  const generateRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -54,8 +55,8 @@ export default function VoxelGame() {
       ( frustumSize * aspect()) / 2,
        frustumSize / 2,
       -frustumSize / 2,
-      0.1,
-      500,
+      -1000,
+      1000,
     );
 
     function updateCamera() {
@@ -93,11 +94,11 @@ export default function VoxelGame() {
     dirLight.shadow.mapSize.width = 2048;
     dirLight.shadow.mapSize.height = 2048;
     dirLight.shadow.camera.near = 0.1;
-    dirLight.shadow.camera.far = 200;
-    dirLight.shadow.camera.left = -30;
-    dirLight.shadow.camera.right = 30;
-    dirLight.shadow.camera.top = 30;
-    dirLight.shadow.camera.bottom = -30;
+    dirLight.shadow.camera.far = 500;
+    dirLight.shadow.camera.left = -80;
+    dirLight.shadow.camera.right = 80;
+    dirLight.shadow.camera.top = 80;
+    dirLight.shadow.camera.bottom = -80;
     scene.add(dirLight);
 
     // ── Ground plane ──────────────────────────────────────────────────────
@@ -190,6 +191,138 @@ export default function VoxelGame() {
       voxelCountRef.current--;
       setVoxelCount(voxelCountRef.current);
     }
+
+    // ── Landscape generation ──────────────────────────────────────────────
+    function clearAllVoxels() {
+      instanceMeshes.forEach((mesh, ci) => {
+        mesh.count = 0;
+        mesh.instanceMatrix.needsUpdate = true;
+        instanceKeys[ci].length = 0;
+      });
+      voxelData.clear();
+    }
+
+    // Value noise helpers
+    function hash2(x: number, y: number) {
+      const n = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
+      return n - Math.floor(n);
+    }
+    function smoothstep(t: number) { return t * t * (3 - 2 * t); }
+    function valueNoise(x: number, y: number) {
+      const ix = Math.floor(x), iy = Math.floor(y);
+      const fx = smoothstep(x - ix), fy = smoothstep(y - iy);
+      return (
+        hash2(ix,     iy    ) * (1 - fx) * (1 - fy) +
+        hash2(ix + 1, iy    ) * fx       * (1 - fy) +
+        hash2(ix,     iy + 1) * (1 - fx) * fy +
+        hash2(ix + 1, iy + 1) * fx       * fy
+      );
+    }
+    function fbm(x: number, y: number) {
+      // 4-octave fractional Brownian motion
+      return (
+        valueNoise(x,       y      ) * 0.500 +
+        valueNoise(x * 2,   y * 2  ) * 0.250 +
+        valueNoise(x * 4,   y * 4  ) * 0.125 +
+        valueNoise(x * 8,   y * 8  ) * 0.063
+      ) / 0.938; // normalise to ~0..1
+    }
+
+    // Color index by depth from surface
+    // 3=green(grass) 1=orange(dirt) 6=teal(stone) 5=purple(deep)  7=white(snow)
+    function terrainColor(gy: number, surfaceY: number): number {
+      if (gy === surfaceY) return surfaceY >= 11 ? 7 : 3; // snow cap or grass
+      if (gy >= surfaceY - 2) return 1;  // dirt
+      if (gy >= 2)            return 6;  // stone
+      return 5;                           // deep / bedrock
+    }
+
+    // Bulk insert without triggering React updates — caller must flush needsUpdate
+    function placeBulk(gx: number, gy: number, gz: number, colorIdx: number) {
+      const k = key(gx, gy, gz);
+      if (voxelData.has(k)) return;
+      const mesh = instanceMeshes[colorIdx];
+      const instanceIdx = mesh.count;
+      tmpMatrix.setPosition(gx, gy + 0.5, gz);
+      mesh.setMatrixAt(instanceIdx, tmpMatrix);
+      mesh.count++;
+      voxelData.set(k, { colorIdx, instanceIdx });
+      instanceKeys[colorIdx][instanceIdx] = k;
+    }
+
+    // 0=red(trunk)  3=green(leaves)
+    function placeTree(gx: number, surfaceY: number, gz: number) {
+      const trunkH = 4 + Math.floor(hash2(gx * 3.1, gz * 7.3) * 2); // 4 or 5, seeded
+
+      // Trunk
+      for (let y = surfaceY + 1; y <= surfaceY + trunkH; y++) {
+        placeBulk(gx, y, gz, 0);
+      }
+
+      // Canopy — blocky Minecraft-style layers around the trunk top
+      const top = surfaceY + trunkH;
+      const layers: Array<{ dy: number; r: number; trim: boolean }> = [
+        { dy: -1, r: 1, trim: false }, // 3×3 collar
+        { dy:  0, r: 2, trim: true  }, // 5×5 minus corners
+        { dy:  1, r: 2, trim: true  }, // 5×5 minus corners
+        { dy:  2, r: 1, trim: false }, // 3×3 cap
+      ];
+      for (const { dy, r, trim } of layers) {
+        for (let dx = -r; dx <= r; dx++) {
+          for (let dz = -r; dz <= r; dz++) {
+            if (trim && Math.abs(dx) === r && Math.abs(dz) === r) continue;
+            placeBulk(gx + dx, top + dy, gz + dz, 3);
+          }
+        }
+      }
+    }
+
+    function generateLandscape() {
+      clearAllVoxels();
+
+      const seed = Math.random() * 100;
+      const SIZE = 64;
+      const HALF = SIZE / 2;
+      const MIN_H = 1;
+      const MAX_H = 14;
+
+      const treeSites: Array<[number, number, number]> = [];
+
+      for (let gx = -HALF; gx < HALF; gx++) {
+        for (let gz = -HALF; gz < HALF; gz++) {
+          const n = fbm(gx * 0.035 + seed, gz * 0.035 + seed);
+          const surfaceY = MIN_H + Math.floor(n * (MAX_H - MIN_H));
+
+          for (let gy = 0; gy <= surfaceY; gy++) {
+            placeBulk(gx, gy, gz, terrainColor(gy, surfaceY));
+          }
+
+          // Collect grass tiles for tree placement (not on snow, not on edges)
+          const isGrass = surfaceY < 11;
+          const notEdge = Math.abs(gx) < HALF - 3 && Math.abs(gz) < HALF - 3;
+          const treeRoll = hash2(gx * 1.7 + seed, gz * 2.3 + seed);
+          if (isGrass && notEdge && treeRoll < 0.04) {
+            treeSites.push([gx, surfaceY, gz]);
+          }
+        }
+      }
+
+      // Place trees after terrain so leaves don't get overwritten by terrain
+      for (const [gx, sy, gz] of treeSites) {
+        placeTree(gx, sy, gz);
+      }
+
+      instanceMeshes.forEach(m => { m.instanceMatrix.needsUpdate = true; });
+      const count = voxelData.size;
+      voxelCountRef.current = count;
+      setVoxelCount(count);
+
+      frustumSize = 50;
+      orbitTarget.set(0, 3, 0);
+      updateCamera();
+    }
+
+    generateRef.current = generateLandscape;
 
     // ── Raycaster ─────────────────────────────────────────────────────────
     const raycaster = new THREE.Raycaster();
@@ -364,11 +497,26 @@ export default function VoxelGame() {
 
       <div style={{
         position: 'fixed', top: 12, right: 12,
-        background: 'rgba(0,0,0,0.55)', color: '#fff',
-        padding: '6px 12px', borderRadius: 8, fontSize: 13,
-        pointerEvents: 'none', userSelect: 'none',
+        display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8,
       }}>
-        Voxels: {voxelCount}
+        <div style={{
+          background: 'rgba(0,0,0,0.55)', color: '#fff',
+          padding: '6px 12px', borderRadius: 8, fontSize: 13,
+          pointerEvents: 'none', userSelect: 'none',
+        }}>
+          Voxels: {voxelCount}
+        </div>
+        <button
+          onClick={() => generateRef.current?.()}
+          style={{
+            background: 'rgba(0,0,0,0.55)', color: '#fff',
+            border: '1px solid rgba(255,255,255,0.3)',
+            padding: '6px 14px', borderRadius: 8, fontSize: 13,
+            cursor: 'pointer',
+          }}
+        >
+          Generate landscape
+        </button>
       </div>
 
       <div style={{

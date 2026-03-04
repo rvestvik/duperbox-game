@@ -374,10 +374,9 @@ export default function VoxelGame() {
       const ro = raycaster.ray.origin;
       const rd = raycaster.ray.direction;
 
-      // Advance ray origin to just above terrain to skip empty sky
+      // Advance ray origin to terrain entry point (handles ro.y above or below MAX_H)
       const MAX_H = 42;
-      let t0 = 0;
-      if (rd.y < 0 && ro.y > MAX_H) t0 = (MAX_H - ro.y) / rd.y;
+      const t0 = Math.abs(rd.y) > 1e-4 ? (MAX_H - ro.y) / rd.y : 0;
 
       let ox = ro.x + t0 * rd.x;
       let oy = ro.y + t0 * rd.y;

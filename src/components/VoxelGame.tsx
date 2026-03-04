@@ -48,6 +48,7 @@ export default function VoxelGame() {
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.autoUpdate = false; // re-triggered manually on changes
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.1;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -110,8 +111,8 @@ export default function VoxelGame() {
     const dirLight = new THREE.DirectionalLight(0xfff4e0, 2.2);
     dirLight.position.set(120, 180, 80);
     dirLight.castShadow = true;
-    dirLight.shadow.mapSize.width = 4096;
-    dirLight.shadow.mapSize.height = 4096;
+    dirLight.shadow.mapSize.width = 2048;
+    dirLight.shadow.mapSize.height = 2048;
     dirLight.shadow.camera.near = 0.1;
     dirLight.shadow.camera.far = 1000;
     dirLight.shadow.camera.left = -200;
@@ -149,11 +150,6 @@ export default function VoxelGame() {
       return mesh;
     });
 
-    // Reverse lookup: InstancedMesh → color index
-    const meshToColorIdx = new Map<THREE.InstancedMesh, number>(
-      instanceMeshes.map((m, i) => [m, i])
-    );
-
     // ── Voxel data ────────────────────────────────────────────────────────
     // key → { colorIdx, instanceIdx }
     const voxelData = new Map<string, { colorIdx: number; instanceIdx: number }>();
@@ -175,6 +171,7 @@ export default function VoxelGame() {
       mesh.setMatrixAt(instanceIdx, tmpMatrix);
       mesh.count++;
       mesh.instanceMatrix.needsUpdate = true;
+      renderer.shadowMap.needsUpdate = true;
 
       voxelData.set(k, { colorIdx, instanceIdx });
       instanceKeys[colorIdx][instanceIdx] = k;
@@ -191,7 +188,6 @@ export default function VoxelGame() {
 
       const lastIdx = mesh.count - 1;
 
-      // Swap the removed instance with the last one to keep the array packed
       if (instanceIdx !== lastIdx) {
         mesh.getMatrixAt(lastIdx, tmpMatrix);
         mesh.setMatrixAt(instanceIdx, tmpMatrix);
@@ -205,6 +201,7 @@ export default function VoxelGame() {
       keys.splice(lastIdx, 1);
       mesh.count--;
       mesh.instanceMatrix.needsUpdate = true;
+      renderer.shadowMap.needsUpdate = true;
       voxelData.delete(k);
 
       voxelCountRef.current--;
@@ -309,45 +306,59 @@ export default function VoxelGame() {
       const MIN_H = 1;
       const MAX_H = 40;
 
+      // Pass 1: compute all surface heights into a flat array
+      const heights = new Int32Array(SIZE * SIZE);
+      for (let gx = -HALF; gx < HALF; gx++) {
+        for (let gz = -HALF; gz < HALF; gz++) {
+          const n = fbm(gx * 0.035 + seed, gz * 0.035 + seed);
+          heights[(gx + HALF) * SIZE + (gz + HALF)] = MIN_H + Math.floor(n * (MAX_H - MIN_H));
+        }
+      }
+      const h = (gx: number, gz: number) =>
+        gx < -HALF || gx >= HALF || gz < -HALF || gz >= HALF
+          ? 0
+          : heights[(gx + HALF) * SIZE + (gz + HALF)];
+
+      // Pass 2: place only voxels with at least one exposed face (surface culling)
       const treeSites: Array<[number, number, number]> = [];
 
       for (let gx = -HALF; gx < HALF; gx++) {
         for (let gz = -HALF; gz < HALF; gz++) {
-          const n = fbm(gx * 0.035 + seed, gz * 0.035 + seed);
-          const surfaceY = MIN_H + Math.floor(n * (MAX_H - MIN_H));
+          const surfaceY = h(gx, gz);
+          const hN = h(gx, gz - 1), hS = h(gx, gz + 1);
+          const hE = h(gx + 1, gz), hW = h(gx - 1, gz);
 
           for (let gy = 0; gy <= surfaceY; gy++) {
-            placeBulk(gx, gy, gz, terrainColor(gy, surfaceY));
+            // Top face always visible; side face visible if neighbor is lower
+            if (gy === surfaceY || gy > hN || gy > hS || gy > hE || gy > hW) {
+              placeBulk(gx, gy, gz, terrainColor(gy, surfaceY));
+            }
           }
 
-          // Collect grass tiles for tree placement (not on snow, not on edges)
           const isGrass = surfaceY < 28;
           const notEdge = Math.abs(gx) < HALF - 3 && Math.abs(gz) < HALF - 3;
-          const treeRoll = hash2(gx * 1.7 + seed, gz * 2.3 + seed);
-          if (isGrass && notEdge && treeRoll < 0.008) {
+          if (isGrass && notEdge && hash2(gx * 1.7 + seed, gz * 2.3 + seed) < 0.008) {
             treeSites.push([gx, surfaceY, gz]);
           }
         }
       }
 
-      // Place trees after terrain so leaves don't get overwritten by terrain
-      for (const [gx, sy, gz] of treeSites) {
-        placeTree(gx, sy, gz);
-      }
+      for (const [gx, sy, gz] of treeSites) placeTree(gx, sy, gz);
 
       instanceMeshes.forEach(m => { m.instanceMatrix.needsUpdate = true; });
+      renderer.shadowMap.needsUpdate = true;
       const count = voxelData.size;
       voxelCountRef.current = count;
       setVoxelCount(count);
 
-      frustumSize = 120;
+      frustumSize = 200;
       orbitTarget.set(0, 5, 0);
       updateCamera();
     }
 
     generateRef.current = generateLandscape;
 
-    // ── Raycaster ─────────────────────────────────────────────────────────
+    // ── Raycaster (DDA grid traversal — O(steps) not O(voxels)) ──────────
     const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2();
 
@@ -356,38 +367,80 @@ export default function VoxelGame() {
       mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
     }
 
-    function getPlacementTarget(event: MouseEvent) {
+    // Returns the first voxel hit and the face normal (pointing away from it)
+    function ddaRay(event: MouseEvent) {
       setNDC(event);
       raycaster.setFromCamera(mouse, camera);
-      // Only 9 objects to test (ground + 8 instanced meshes) regardless of voxel count
-      const hits = raycaster.intersectObjects([groundPlane, ...instanceMeshes]);
-      if (!hits.length) return null;
-      const hit = hits[0];
+      const ro = raycaster.ray.origin;
+      const rd = raycaster.ray.direction;
 
-      if (hit.object === groundPlane) {
-        return { gx: Math.round(hit.point.x), gy: 0, gz: Math.round(hit.point.z) };
+      // Advance ray origin to just above terrain to skip empty sky
+      const MAX_H = 42;
+      let t0 = 0;
+      if (rd.y < 0 && ro.y > MAX_H) t0 = (MAX_H - ro.y) / rd.y;
+
+      let ox = ro.x + t0 * rd.x;
+      let oy = ro.y + t0 * rd.y;
+      let oz = ro.z + t0 * rd.z;
+
+      // Voxel (gx,gy,gz) occupies x∈[gx-0.5,gx+0.5], y∈[gy,gy+1], z∈[gz-0.5,gz+0.5]
+      let gx = Math.round(ox);
+      let gy = Math.floor(oy);
+      let gz = Math.round(oz);
+
+      const sx = rd.x > 0 ? 1 : rd.x < 0 ? -1 : 0;
+      const sy = rd.y > 0 ? 1 : rd.y < 0 ? -1 : 0;
+      const sz = rd.z > 0 ? 1 : rd.z < 0 ? -1 : 0;
+
+      let tMaxX = sx ? ((gx + sx * 0.5) - ox) / rd.x : Infinity;
+      let tMaxY = sy ? ((gy + (sy > 0 ? 1 : 0)) - oy) / rd.y : Infinity;
+      let tMaxZ = sz ? ((gz + sz * 0.5) - oz) / rd.z : Infinity;
+
+      const tDX = sx ? 1 / Math.abs(rd.x) : Infinity;
+      const tDY = sy ? 1 / Math.abs(rd.y) : Infinity;
+      const tDZ = sz ? 1 / Math.abs(rd.z) : Infinity;
+
+      let nx = 0, ny = 0, nz = 0;
+
+      for (let i = 0; i < 256; i++) {
+        if (gy >= 0 && gy <= MAX_H) {
+          const k = key(gx, gy, gz);
+          if (voxelData.has(k)) return { k, gx, gy, gz, nx, ny, nz };
+        }
+        if (gy < -1) break;
+
+        if (tMaxX < tMaxY && tMaxX < tMaxZ) {
+          gx += sx; nx = -sx; ny = 0; nz = 0; tMaxX += tDX;
+        } else if (tMaxY < tMaxZ) {
+          gy += sy; nx = 0; ny = -sy; nz = 0; tMaxY += tDY;
+        } else {
+          gz += sz; nx = 0; ny = 0; nz = -sz; tMaxZ += tDZ;
+        }
       }
+      return null;
+    }
 
-      const instanceId = hit.instanceId;
-      if (instanceId == null || !hit.face) return null;
-      const colorIdx = meshToColorIdx.get(hit.object as THREE.InstancedMesh)!;
-      const k = instanceKeys[colorIdx][instanceId];
-      if (!k) return null;
-      const [vx, vy, vz] = k.split(',').map(Number);
-      return {
-        gx: vx + Math.round(hit.face.normal.x),
-        gy: vy + Math.round(hit.face.normal.y),
-        gz: vz + Math.round(hit.face.normal.z),
-      };
+    function getPlacementTarget(event: MouseEvent) {
+      const hit = ddaRay(event);
+      if (hit) return { gx: hit.gx + hit.nx, gy: hit.gy + hit.ny, gz: hit.gz + hit.nz };
+
+      // Fall back to ground plane (y=0) analytical intersection
+      setNDC(event);
+      raycaster.setFromCamera(mouse, camera);
+      const ro = raycaster.ray.origin;
+      const rd = raycaster.ray.direction;
+      if (rd.y < 0 && ro.y > 0) {
+        const t = -ro.y / rd.y;
+        return { gx: Math.round(ro.x + t * rd.x), gy: 0, gz: Math.round(ro.z + t * rd.z) };
+      }
+      return null;
     }
 
     function getRemoveTarget(event: MouseEvent) {
-      setNDC(event);
-      raycaster.setFromCamera(mouse, camera);
-      const hits = raycaster.intersectObjects(instanceMeshes);
-      if (!hits.length || hits[0].instanceId == null) return null;
-      const colorIdx = meshToColorIdx.get(hits[0].object as THREE.InstancedMesh)!;
-      return { colorIdx, instanceIdx: hits[0].instanceId };
+      const hit = ddaRay(event);
+      if (!hit) return null;
+      const data = voxelData.get(hit.k);
+      return data ?? null;
     }
 
     // ── Orbit drag state ──────────────────────────────────────────────────

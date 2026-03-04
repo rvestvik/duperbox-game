@@ -4,14 +4,26 @@ import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 
 const COLORS = [
-  0xe74c3c, // red
-  0x8b5e3c, // warm brown (wood / dirt)
-  0xf1c40f, // yellow
-  0x2d8a4e, // forest green
-  0x3498db, // blue
-  0x95a5a6, // light stone gray
-  0x5d6d7e, // slate blue-gray (deep stone)
-  0xf0ece4, // warm off-white (snow)
+  0xc0392b, // 0 — deep red       (paint)
+  0x7a5230, // 1 — rich dirt brown (terrain dirt)
+  0xd4ac0d, // 2 — golden yellow  (paint)
+  0x4a7c3f, // 3 — muted forest green (terrain grass)
+  0x2471a3, // 4 — deep ocean blue (paint)
+  0x9e9080, // 5 — warm stone      (terrain stone)
+  0x5a5048, // 6 — dark warm stone (terrain deep)
+  0xedf1f7, // 7 — cool snow white (terrain snow)
+];
+
+// Per-color PBR roughness (matches material feel of each color)
+const ROUGHNESS = [
+  0.90, // 0 red
+  0.97, // 1 dirt
+  0.85, // 2 yellow
+  0.93, // 3 grass
+  0.20, // 4 blue (slightly shiny)
+  0.82, // 5 stone
+  0.72, // 6 deep stone
+  0.90, // 7 snow
 ];
 
 const CAMERA_DISTANCE = 20;
@@ -126,8 +138,8 @@ export default function VoxelGame() {
     scene.add(ghost);
 
     // ── InstancedMesh per color ───────────────────────────────────────────
-    const instanceMeshes = COLORS.map(color => {
-      const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.85, metalness: 0.0 });
+    const instanceMeshes = COLORS.map((color, i) => {
+      const mat = new THREE.MeshStandardMaterial({ color, roughness: ROUGHNESS[i], metalness: 0.0 });
       const mesh = new THREE.InstancedMesh(boxGeo, mat, MAX_INSTANCES);
       mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       mesh.count = 0;
@@ -236,12 +248,16 @@ export default function VoxelGame() {
     }
 
     // Color index by depth from surface
-    // 7=snow  3=grass  1=brown dirt  5=light stone  6=deep slate
+    // 7=snow  5=bare rock  3=grass  1=dirt  5=stone  6=deep stone
     function terrainColor(gy: number, surfaceY: number): number {
-      if (gy === surfaceY) return surfaceY >= 28 ? 7 : 3; // snow cap or grass
-      if (gy >= surfaceY - 3) return 1;  // warm brown dirt
-      if (gy >= 2)            return 5;  // light stone
-      return 6;                           // deep slate
+      if (gy === surfaceY) {
+        if (surfaceY >= 30) return 7; // snow cap
+        if (surfaceY >= 22) return 5; // bare rocky peak
+        return 3;                     // grass
+      }
+      if (gy >= surfaceY - 3) return 1; // dirt
+      if (gy >= 3)            return 5; // stone
+      return 6;                         // dark deep stone
     }
 
     // Bulk insert without triggering React updates — caller must flush needsUpdate
@@ -288,7 +304,7 @@ export default function VoxelGame() {
       clearAllVoxels();
 
       const seed = Math.random() * 100;
-      const SIZE = 200;
+      const SIZE = 400;
       const HALF = SIZE / 2;
       const MIN_H = 1;
       const MAX_H = 40;

@@ -5,17 +5,17 @@ import * as THREE from 'three';
 
 const COLORS = [
   0xe74c3c, // red
-  0xe67e22, // orange
+  0x8b5e3c, // warm brown (wood / dirt)
   0xf1c40f, // yellow
-  0x2ecc71, // green
+  0x2d8a4e, // forest green
   0x3498db, // blue
-  0x9b59b6, // purple
-  0x1abc9c, // teal
-  0xecf0f1, // white
+  0x95a5a6, // light stone gray
+  0x5d6d7e, // slate blue-gray (deep stone)
+  0xf0ece4, // warm off-white (snow)
 ];
 
 const CAMERA_DISTANCE = 20;
-const MAX_INSTANCES = 100_000; // per color
+const MAX_INSTANCES = 500_000; // per color
 
 export default function VoxelGame() {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -32,15 +32,20 @@ export default function VoxelGame() {
 
     // ── Renderer ──────────────────────────────────────────────────────────
     const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.1;
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
     mount.appendChild(renderer.domElement);
 
     // ── Scene ─────────────────────────────────────────────────────────────
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x87ceeb);
+    const SKY_COLOR = new THREE.Color(0x90b8d4);
+    scene.background = SKY_COLOR;
+    scene.fog = new THREE.FogExp2(SKY_COLOR.getHex(), 0.005);
 
     // ── Camera orbit state ────────────────────────────────────────────────
     let azimuth = Math.PI / 4;
@@ -85,42 +90,44 @@ export default function VoxelGame() {
     updateCamera();
 
     // ── Lighting ──────────────────────────────────────────────────────────
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
-    scene.add(ambientLight);
+    // Sky blue from above, warm earth from below
+    const hemiLight = new THREE.HemisphereLight(0x90b8d4, 0x5a3d1a, 0.7);
+    scene.add(hemiLight);
 
-    const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    dirLight.position.set(10, 20, 10);
+    // Warm sun
+    const dirLight = new THREE.DirectionalLight(0xfff4e0, 2.2);
+    dirLight.position.set(120, 180, 80);
     dirLight.castShadow = true;
-    dirLight.shadow.mapSize.width = 2048;
-    dirLight.shadow.mapSize.height = 2048;
+    dirLight.shadow.mapSize.width = 4096;
+    dirLight.shadow.mapSize.height = 4096;
     dirLight.shadow.camera.near = 0.1;
-    dirLight.shadow.camera.far = 500;
-    dirLight.shadow.camera.left = -80;
-    dirLight.shadow.camera.right = 80;
-    dirLight.shadow.camera.top = 80;
-    dirLight.shadow.camera.bottom = -80;
+    dirLight.shadow.camera.far = 1000;
+    dirLight.shadow.camera.left = -200;
+    dirLight.shadow.camera.right = 200;
+    dirLight.shadow.camera.top = 200;
+    dirLight.shadow.camera.bottom = -200;
+    dirLight.shadow.bias = -0.0003;
     scene.add(dirLight);
 
     // ── Ground plane ──────────────────────────────────────────────────────
-    const groundGeo = new THREE.PlaneGeometry(200, 200);
-    const groundMat = new THREE.MeshLambertMaterial({ color: 0x4caf50 });
+    const groundGeo = new THREE.PlaneGeometry(2000, 2000);
+    const groundMat = new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide });
     const groundPlane = new THREE.Mesh(groundGeo, groundMat);
     groundPlane.rotation.x = -Math.PI / 2;
-    groundPlane.receiveShadow = true;
     scene.add(groundPlane);
 
     // ── Shared geometry ───────────────────────────────────────────────────
     const boxGeo = new THREE.BoxGeometry(1, 1, 1);
 
     // ── Ghost voxel ───────────────────────────────────────────────────────
-    const ghostMat = new THREE.MeshPhongMaterial({ color: 0x00ff88, opacity: 0.5, transparent: true });
+    const ghostMat = new THREE.MeshStandardMaterial({ color: 0x00ff88, opacity: 0.4, transparent: true, roughness: 0.8, metalness: 0 });
     const ghost = new THREE.Mesh(boxGeo, ghostMat);
     ghost.visible = false;
     scene.add(ghost);
 
     // ── InstancedMesh per color ───────────────────────────────────────────
     const instanceMeshes = COLORS.map(color => {
-      const mat = new THREE.MeshPhongMaterial({ color });
+      const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.85, metalness: 0.0 });
       const mesh = new THREE.InstancedMesh(boxGeo, mat, MAX_INSTANCES);
       mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       mesh.count = 0;
@@ -229,12 +236,12 @@ export default function VoxelGame() {
     }
 
     // Color index by depth from surface
-    // 3=green(grass) 1=orange(dirt) 6=teal(stone) 5=purple(deep)  7=white(snow)
+    // 7=snow  3=grass  1=brown dirt  5=light stone  6=deep slate
     function terrainColor(gy: number, surfaceY: number): number {
-      if (gy === surfaceY) return surfaceY >= 11 ? 7 : 3; // snow cap or grass
-      if (gy >= surfaceY - 2) return 1;  // dirt
-      if (gy >= 2)            return 6;  // stone
-      return 5;                           // deep / bedrock
+      if (gy === surfaceY) return surfaceY >= 28 ? 7 : 3; // snow cap or grass
+      if (gy >= surfaceY - 3) return 1;  // warm brown dirt
+      if (gy >= 2)            return 5;  // light stone
+      return 6;                           // deep slate
     }
 
     // Bulk insert without triggering React updates — caller must flush needsUpdate
@@ -281,10 +288,10 @@ export default function VoxelGame() {
       clearAllVoxels();
 
       const seed = Math.random() * 100;
-      const SIZE = 64;
+      const SIZE = 200;
       const HALF = SIZE / 2;
       const MIN_H = 1;
-      const MAX_H = 14;
+      const MAX_H = 40;
 
       const treeSites: Array<[number, number, number]> = [];
 
@@ -298,10 +305,10 @@ export default function VoxelGame() {
           }
 
           // Collect grass tiles for tree placement (not on snow, not on edges)
-          const isGrass = surfaceY < 11;
+          const isGrass = surfaceY < 28;
           const notEdge = Math.abs(gx) < HALF - 3 && Math.abs(gz) < HALF - 3;
           const treeRoll = hash2(gx * 1.7 + seed, gz * 2.3 + seed);
-          if (isGrass && notEdge && treeRoll < 0.04) {
+          if (isGrass && notEdge && treeRoll < 0.008) {
             treeSites.push([gx, surfaceY, gz]);
           }
         }
@@ -317,8 +324,8 @@ export default function VoxelGame() {
       voxelCountRef.current = count;
       setVoxelCount(count);
 
-      frustumSize = 50;
-      orbitTarget.set(0, 3, 0);
+      frustumSize = 120;
+      orbitTarget.set(0, 5, 0);
       updateCamera();
     }
 
@@ -434,7 +441,7 @@ export default function VoxelGame() {
     function onWheel(event: WheelEvent) {
       event.preventDefault();
       if (event.ctrlKey) {
-        frustumSize = Math.max(4, Math.min(80, frustumSize + event.deltaY * 0.3));
+        frustumSize = Math.max(4, Math.min(300, frustumSize + event.deltaY * 0.3));
         updateCamera();
       } else {
         pan(event.deltaX, event.deltaY);

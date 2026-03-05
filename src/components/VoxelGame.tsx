@@ -460,6 +460,18 @@ export default function VoxelGame() {
         dragX = event.clientX;
         dragY = event.clientY;
         dragMoved = false;
+
+        // Rotate around the voxel under the cursor (or ground plane if none)
+        if (event.metaKey) {
+          const hit = ddaRay(event);
+          if (hit) {
+            orbitTarget.set(hit.gx, hit.gy + 0.5, hit.gz);
+          } else {
+            const target = getPlacementTarget(event);
+            if (target) orbitTarget.set(target.gx, target.gy, target.gz);
+          }
+          updateCamera();
+        }
       }
     }
 

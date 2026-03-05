@@ -521,6 +521,8 @@ export default function VoxelGame() {
     let dragMeta = false;
     let dragX = 0;
     let dragY = 0;
+    let dragStartX = 0;
+    let dragStartY = 0;
     let dragMoved = false;
 
     // Pivot for cursor-locked orbit: the hit voxel's position in camera-space
@@ -548,6 +550,8 @@ export default function VoxelGame() {
         dragMeta = event.metaKey;
         dragX = event.clientX;
         dragY = event.clientY;
+        dragStartX = event.clientX;
+        dragStartY = event.clientY;
         dragMoved = false;
 
         // Always set up cursor-locked orbit pivot on any drag.
@@ -570,7 +574,7 @@ export default function VoxelGame() {
       if (dragging) {
         const dx = event.clientX - dragX;
         const dy = event.clientY - dragY;
-        if (Math.abs(dx) > 4 || Math.abs(dy) > 4) dragMoved = true;
+        if (Math.abs(event.clientX - dragStartX) > 4 || Math.abs(event.clientY - dragStartY) > 4) dragMoved = true;
         if (dragMoved) {
           azimuth   -= dx * 0.008;
           elevation  = Math.max(0.05, Math.min(Math.PI / 2 - 0.05, elevation + dy * 0.008));

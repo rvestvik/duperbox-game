@@ -59,7 +59,6 @@ export default function VoxelGame() {
     const scene = new THREE.Scene();
     const SKY_COLOR = new THREE.Color(0x90b8d4);
     scene.background = SKY_COLOR;
-    scene.fog = new THREE.FogExp2(SKY_COLOR.getHex(), 0.005);
 
     // ── Camera orbit state ────────────────────────────────────────────────
     let azimuth = Math.PI / 4;
@@ -105,11 +104,11 @@ export default function VoxelGame() {
 
     // ── Lighting ──────────────────────────────────────────────────────────
     // Sky blue from above, warm earth from below
-    const hemiLight = new THREE.HemisphereLight(0x90b8d4, 0x5a3d1a, 0.7);
+    const hemiLight = new THREE.HemisphereLight(0x90b8d4, 0x5a3d1a, 1.4);
     scene.add(hemiLight);
 
     // Warm sun
-    const dirLight = new THREE.DirectionalLight(0xfff4e0, 2.2);
+    const dirLight = new THREE.DirectionalLight(0xfff4e0, 1.4);
     dirLight.position.set(120, 180, 80);
     dirLight.castShadow = true;
     dirLight.shadow.mapSize.width = 2048;

@@ -47,7 +47,7 @@ export default function VoxelGame() {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.type = THREE.VSMShadowMap;
     renderer.shadowMap.autoUpdate = false;  // re-triggered manually on changes
     renderer.shadowMap.needsUpdate = true;  // initialize shadow map on first frame
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -121,6 +121,8 @@ export default function VoxelGame() {
     dirLight.shadow.camera.top = 200;
     dirLight.shadow.camera.bottom = -200;
     dirLight.shadow.bias = -0.0003;
+    dirLight.shadow.radius = 12;
+    dirLight.shadow.blurSamples = 16;
     scene.add(dirLight);
 
     // ── Ground plane ──────────────────────────────────────────────────────

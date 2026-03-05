@@ -133,6 +133,25 @@ export default function VoxelGame() {
     // ── Shared geometry ───────────────────────────────────────────────────
     const boxGeo = new THREE.BoxGeometry(1, 1, 1);
 
+    // ── Edge texture ──────────────────────────────────────────────────────
+    // White face with dark border — multiplied with material color via `map`,
+    // so edges darken each cube face without affecting the base hue.
+    const EDGE_TEX_SIZE = 64;
+    const edgeCanvas = document.createElement('canvas');
+    edgeCanvas.width = EDGE_TEX_SIZE;
+    edgeCanvas.height = EDGE_TEX_SIZE;
+    const edgeCtx = edgeCanvas.getContext('2d')!;
+    edgeCtx.fillStyle = '#ffffff';
+    edgeCtx.fillRect(0, 0, EDGE_TEX_SIZE, EDGE_TEX_SIZE);
+    const edgePx = 1;
+    edgeCtx.fillStyle = 'rgba(0,0,0,0.55)';
+    edgeCtx.fillRect(0, 0, EDGE_TEX_SIZE, edgePx);           // top
+    edgeCtx.fillRect(0, EDGE_TEX_SIZE - edgePx, EDGE_TEX_SIZE, edgePx); // bottom
+    edgeCtx.fillRect(0, 0, edgePx, EDGE_TEX_SIZE);           // left
+    edgeCtx.fillRect(EDGE_TEX_SIZE - edgePx, 0, edgePx, EDGE_TEX_SIZE); // right
+    const edgeTex = new THREE.CanvasTexture(edgeCanvas);
+    edgeTex.colorSpace = THREE.SRGBColorSpace;
+
     // ── Ghost voxel ───────────────────────────────────────────────────────
     const ghostMat = new THREE.MeshStandardMaterial({ color: 0x00ff88, opacity: 0.4, transparent: true, roughness: 0.8, metalness: 0 });
     const ghost = new THREE.Mesh(boxGeo, ghostMat);
@@ -141,7 +160,7 @@ export default function VoxelGame() {
 
     // ── InstancedMesh per color ───────────────────────────────────────────
     const instanceMeshes = COLORS.map((color, i) => {
-      const mat = new THREE.MeshStandardMaterial({ color, roughness: ROUGHNESS[i], metalness: 0.0 });
+      const mat = new THREE.MeshStandardMaterial({ color, map: edgeTex, roughness: ROUGHNESS[i], metalness: 0.0 });
       const mesh = new THREE.InstancedMesh(boxGeo, mat, MAX_INSTANCES);
       mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       mesh.count = 0;

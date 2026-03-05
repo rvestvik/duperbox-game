@@ -332,7 +332,9 @@ export default function VoxelGame() {
       for (let gx = -HALF; gx < HALF; gx++) {
         for (let gz = -HALF; gz < HALF; gz++) {
           const n = fbm(gx * 0.035 + seed, gz * 0.035 + seed);
-          heights[(gx + HALF) * SIZE + (gz + HALF)] = MIN_H + Math.floor(n * (MAX_H - MIN_H));
+          // Power curve > 1 flattens most of the map; only peaks stay high
+          const shaped = Math.pow(n, 2.2);
+          heights[(gx + HALF) * SIZE + (gz + HALF)] = MIN_H + Math.floor(shaped * (MAX_H - MIN_H));
         }
       }
       const h = (gx: number, gz: number) =>
@@ -358,7 +360,7 @@ export default function VoxelGame() {
 
           const isGrass = surfaceY < 28;
           const notEdge = Math.abs(gx) < HALF - 3 && Math.abs(gz) < HALF - 3;
-          if (isGrass && notEdge && hash2(gx * 1.7 + seed, gz * 2.3 + seed) < 0.008) {
+          if (isGrass && notEdge && hash2(gx * 1.7 + seed, gz * 2.3 + seed) < 0.0016) {
             treeSites.push([gx, surfaceY, gz]);
           }
         }

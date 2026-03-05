@@ -2,32 +2,31 @@
 
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
+import { COLORS } from '../lib/constants';
+import { OrbitCamera } from '../lib/OrbitCamera';
+import { VoxelWorld } from '../lib/VoxelWorld';
+import { generateLandscape } from '../lib/terrain';
+import { ddaRay, getPlacementTarget, getRemoveTarget } from '../lib/raycast';
+import { GameUI } from './GameUI';
 
-const COLORS = [
-  0xc0392b, // 0 — deep red          (paint / tree trunk)
-  0x9a6a42, // 1 — warm dirt brown   (terrain dirt)
-  0x4ab83a, // 2 — bright leaf green (tree canopy)
-  0x8b6914, // 3 — dry grass brown   (terrain grass)
-  0x3a8ec0, // 4 — sky blue          (paint)
-  0xbcb0a4, // 5 — light warm stone  (terrain stone)
-  0x7a6e66, // 6 — mid warm stone    (terrain deep)
-  0xedf1f7, // 7 — cool snow white   (terrain snow)
-];
-
-// Per-color PBR roughness (matches material feel of each color)
-const ROUGHNESS = [
-  0.90, // 0 red
-  0.97, // 1 dirt
-  0.90, // 2 leaf green
-  0.93, // 3 grass
-  0.20, // 4 blue (slightly shiny)
-  0.82, // 5 stone
-  0.75, // 6 deep stone
-  0.90, // 7 snow
-];
-
-const CAMERA_DISTANCE = 20;
-const MAX_INSTANCES = 500_000; // per color
+function createEdgeTexture(): THREE.CanvasTexture {
+  const SIZE = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width = SIZE;
+  canvas.height = SIZE;
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, SIZE, SIZE);
+  const px = 2;
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillRect(0, 0,        SIZE, px);
+  ctx.fillRect(0, SIZE - px, SIZE, px);
+  ctx.fillRect(0, 0,        px,   SIZE);
+  ctx.fillRect(SIZE - px, 0, px,  SIZE);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
 
 export default function VoxelGame() {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -35,7 +34,6 @@ export default function VoxelGame() {
   const [activeColor, setActiveColor] = useState(0);
 
   const activeColorRef = useRef(0);
-  const voxelCountRef = useRef(0);
   const generateRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
@@ -48,8 +46,8 @@ export default function VoxelGame() {
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.VSMShadowMap;
-    renderer.shadowMap.autoUpdate = false;  // re-triggered manually on changes
-    renderer.shadowMap.needsUpdate = true;  // initialize shadow map on first frame
+    renderer.shadowMap.autoUpdate = false;
+    renderer.shadowMap.needsUpdate = true;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.25;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -57,63 +55,19 @@ export default function VoxelGame() {
 
     // ── Scene ─────────────────────────────────────────────────────────────
     const scene = new THREE.Scene();
-    const SKY_COLOR = new THREE.Color(0x90b8d4);
-    scene.background = SKY_COLOR;
+    scene.background = new THREE.Color(0x90b8d4);
 
-    // ── Camera orbit state ────────────────────────────────────────────────
-    let azimuth = Math.PI / 4;
-    let elevation = Math.atan(1 / Math.sqrt(2));
-    let orbitDistance = CAMERA_DISTANCE;
-    let frustumSize = 20;
-    const orbitTarget = new THREE.Vector3(0, 0, 0);
-
-    const aspect = () => window.innerWidth / window.innerHeight;
-
-    const camera = new THREE.OrthographicCamera(
-      (-frustumSize * aspect()) / 2,
-      ( frustumSize * aspect()) / 2,
-       frustumSize / 2,
-      -frustumSize / 2,
-      -1000,
-      1000,
-    );
-
-    function updateCamera() {
-      const x = orbitDistance * Math.cos(elevation) * Math.sin(azimuth);
-      const y = orbitDistance * Math.sin(elevation);
-      const z = orbitDistance * Math.cos(elevation) * Math.cos(azimuth);
-      camera.position.set(orbitTarget.x + x, orbitTarget.y + y, orbitTarget.z + z);
-      camera.lookAt(orbitTarget);
-      const a = aspect();
-      camera.left   = (-frustumSize * a) / 2;
-      camera.right  = ( frustumSize * a) / 2;
-      camera.top    =   frustumSize / 2;
-      camera.bottom =  -frustumSize / 2;
-      camera.updateProjectionMatrix();
-    }
-
-    function pan(dx: number, dy: number) {
-      const speed = frustumSize / window.innerHeight;
-      const right = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 0);
-      const up    = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 1);
-      orbitTarget.addScaledVector(right,  dx * speed);
-      orbitTarget.addScaledVector(up,    -dy * speed);
-      updateCamera();
-    }
-
-    updateCamera();
+    // ── Camera ────────────────────────────────────────────────────────────
+    const orbit = new OrbitCamera();
+    scene.add(orbit.camera); // not required but keeps it in the graph
 
     // ── Lighting ──────────────────────────────────────────────────────────
-    // Sky blue from above, warm earth from below
-    const hemiLight = new THREE.HemisphereLight(0x90b8d4, 0x5a3d1a, 2.4);
-    scene.add(hemiLight);
+    scene.add(new THREE.HemisphereLight(0x90b8d4, 0x5a3d1a, 2.4));
 
-    // Warm sun
     const dirLight = new THREE.DirectionalLight(0xfff4e0, 0.8);
     dirLight.position.set(40, 200, 30);
     dirLight.castShadow = true;
-    dirLight.shadow.mapSize.width = 2048;
-    dirLight.shadow.mapSize.height = 2048;
+    dirLight.shadow.mapSize.set(2048, 2048);
     dirLight.shadow.camera.near = 0.1;
     dirLight.shadow.camera.far = 1000;
     dirLight.shadow.camera.left = -200;
@@ -125,448 +79,66 @@ export default function VoxelGame() {
     dirLight.shadow.blurSamples = 25;
     scene.add(dirLight);
 
-    // ── Ground plane ──────────────────────────────────────────────────────
-    const groundGeo = new THREE.PlaneGeometry(2000, 2000);
-    const groundMat = new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide });
-    const groundPlane = new THREE.Mesh(groundGeo, groundMat);
+    // ── Ground plane (for raycasting empty space) ─────────────────────────
+    const groundPlane = new THREE.Mesh(
+      new THREE.PlaneGeometry(2000, 2000),
+      new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide }),
+    );
     groundPlane.rotation.x = -Math.PI / 2;
     scene.add(groundPlane);
 
-    // ── Shared geometry ───────────────────────────────────────────────────
+    // ── Shared geometry + edge texture ────────────────────────────────────
     const boxGeo = new THREE.BoxGeometry(1, 1, 1);
+    const edgeTex = createEdgeTexture();
 
-    // ── Edge texture ──────────────────────────────────────────────────────
-    // White face with dark border — multiplied with material color via `map`,
-    // so edges darken each cube face without affecting the base hue.
-    const EDGE_TEX_SIZE = 64;
-    const edgeCanvas = document.createElement('canvas');
-    edgeCanvas.width = EDGE_TEX_SIZE;
-    edgeCanvas.height = EDGE_TEX_SIZE;
-    const edgeCtx = edgeCanvas.getContext('2d')!;
-    edgeCtx.fillStyle = '#ffffff';
-    edgeCtx.fillRect(0, 0, EDGE_TEX_SIZE, EDGE_TEX_SIZE);
-    const edgePx = 2;
-    edgeCtx.fillStyle = 'rgba(0,0,0,0.55)';
-    edgeCtx.fillRect(0, 0, EDGE_TEX_SIZE, edgePx);           // top
-    edgeCtx.fillRect(0, EDGE_TEX_SIZE - edgePx, EDGE_TEX_SIZE, edgePx); // bottom
-    edgeCtx.fillRect(0, 0, edgePx, EDGE_TEX_SIZE);           // left
-    edgeCtx.fillRect(EDGE_TEX_SIZE - edgePx, 0, edgePx, EDGE_TEX_SIZE); // right
-    const edgeTex = new THREE.CanvasTexture(edgeCanvas);
-    edgeTex.colorSpace = THREE.SRGBColorSpace;
+    // ── Voxel world ───────────────────────────────────────────────────────
+    const world = new VoxelWorld(scene, renderer, boxGeo, edgeTex);
 
     // ── Ghost voxel ───────────────────────────────────────────────────────
-    const ghostMat = new THREE.MeshStandardMaterial({ color: 0x00ff88, opacity: 0.4, transparent: true, roughness: 0.8, metalness: 0 });
-    const ghost = new THREE.Mesh(boxGeo, ghostMat);
+    const ghost = new THREE.Mesh(
+      boxGeo,
+      new THREE.MeshStandardMaterial({ color: 0x00ff88, opacity: 0.4, transparent: true, roughness: 0.8 }),
+    );
     ghost.visible = false;
     scene.add(ghost);
 
-    // ── InstancedMesh per color ───────────────────────────────────────────
-    const instanceMeshes = COLORS.map((color, i) => {
-      const mat = new THREE.MeshStandardMaterial({ color, map: edgeTex, roughness: ROUGHNESS[i], metalness: 0.0 });
-      const mesh = new THREE.InstancedMesh(boxGeo, mat, MAX_INSTANCES);
-      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      mesh.count = 0;
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      mesh.frustumCulled = false; // bounding sphere is BoxGeometry(1,1,1) — useless for instanced meshes spanning the whole terrain
-      scene.add(mesh);
-      return mesh;
-    });
-
-    // ── Water ─────────────────────────────────────────────────────────────
-    const WATER_LEVEL = 3; // grid y of the water surface
-    const waterMat = new THREE.MeshStandardMaterial({
-      color: 0x1a6fa8, transparent: true, opacity: 0.55,
-      roughness: 0.05, metalness: 0.15, depthWrite: false,
-    });
-    const waterMesh = new THREE.InstancedMesh(boxGeo, waterMat, 500_000);
-    waterMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    waterMesh.count = 0;
-    waterMesh.castShadow = false;
-    waterMesh.receiveShadow = false;
-    waterMesh.frustumCulled = false;
-    scene.add(waterMesh);
-
-    // ── Voxel data ────────────────────────────────────────────────────────
-    // key → { colorIdx, instanceIdx }
-    const voxelData = new Map<string, { colorIdx: number; instanceIdx: number }>();
-    // instanceKeys[colorIdx][instanceIdx] = key
-    const instanceKeys: string[][] = COLORS.map(() => []);
-
-    const key = (gx: number, gy: number, gz: number) => `${gx},${gy},${gz}`;
-    const tmpMatrix = new THREE.Matrix4();
-
-    function addVoxel(gx: number, gy: number, gz: number) {
-      const k = key(gx, gy, gz);
-      if (voxelData.has(k)) return;
-
-      const colorIdx = activeColorRef.current;
-      const mesh = instanceMeshes[colorIdx];
-      const instanceIdx = mesh.count;
-
-      tmpMatrix.setPosition(gx, gy + 0.5, gz);
-      mesh.setMatrixAt(instanceIdx, tmpMatrix);
-      mesh.count++;
-      mesh.instanceMatrix.needsUpdate = true;
-      renderer.shadowMap.needsUpdate = true;
-
-      voxelData.set(k, { colorIdx, instanceIdx });
-      instanceKeys[colorIdx][instanceIdx] = k;
-
-      voxelCountRef.current++;
-      setVoxelCount(voxelCountRef.current);
+    // ── Generate landscape ────────────────────────────────────────────────
+    function generate() {
+      const { frustumSize, orbitTarget } = generateLandscape(world);
+      orbit.frustumSize = frustumSize;
+      orbit.orbitTarget.copy(orbitTarget);
+      orbit.update();
+      setVoxelCount(world.count);
     }
+    generateRef.current = generate;
 
-    function removeVoxel(colorIdx: number, instanceIdx: number) {
-      const mesh = instanceMeshes[colorIdx];
-      const keys = instanceKeys[colorIdx];
-      const k = keys[instanceIdx];
-      if (!k) return;
-
-      const lastIdx = mesh.count - 1;
-
-      if (instanceIdx !== lastIdx) {
-        mesh.getMatrixAt(lastIdx, tmpMatrix);
-        mesh.setMatrixAt(instanceIdx, tmpMatrix);
-        mesh.instanceMatrix.needsUpdate = true;
-
-        const lastKey = keys[lastIdx];
-        keys[instanceIdx] = lastKey;
-        voxelData.set(lastKey, { colorIdx, instanceIdx });
-      }
-
-      keys.splice(lastIdx, 1);
-      mesh.count--;
-      mesh.instanceMatrix.needsUpdate = true;
-      renderer.shadowMap.needsUpdate = true;
-      voxelData.delete(k);
-
-      voxelCountRef.current--;
-      setVoxelCount(voxelCountRef.current);
-    }
-
-    // ── Landscape generation ──────────────────────────────────────────────
-    function clearAllVoxels() {
-      instanceMeshes.forEach((mesh, ci) => {
-        mesh.count = 0;
-        mesh.instanceMatrix.needsUpdate = true;
-        instanceKeys[ci].length = 0;
-      });
-      waterMesh.count = 0;
-      waterMesh.instanceMatrix.needsUpdate = true;
-      voxelData.clear();
-    }
-
-    // Value noise helpers
-    function hash2(x: number, y: number) {
-      const n = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
-      return n - Math.floor(n);
-    }
-    function smoothstep(t: number) { return t * t * (3 - 2 * t); }
-    function valueNoise(x: number, y: number) {
-      const ix = Math.floor(x), iy = Math.floor(y);
-      const fx = smoothstep(x - ix), fy = smoothstep(y - iy);
-      return (
-        hash2(ix,     iy    ) * (1 - fx) * (1 - fy) +
-        hash2(ix + 1, iy    ) * fx       * (1 - fy) +
-        hash2(ix,     iy + 1) * (1 - fx) * fy +
-        hash2(ix + 1, iy + 1) * fx       * fy
-      );
-    }
-    function fbm(x: number, y: number) {
-      // 4-octave fractional Brownian motion
-      return (
-        valueNoise(x,       y      ) * 0.500 +
-        valueNoise(x * 2,   y * 2  ) * 0.250 +
-        valueNoise(x * 4,   y * 4  ) * 0.125 +
-        valueNoise(x * 8,   y * 8  ) * 0.063
-      ) / 0.938; // normalise to ~0..1
-    }
-
-    // Color index by depth from surface
-    // 7=snow  5=bare rock  3=grass  1=dirt  5=stone  6=deep stone
-    function terrainColor(gy: number, surfaceY: number): number {
-      if (gy === surfaceY) {
-        if (surfaceY >= 30) return 7; // snow cap
-        if (surfaceY >= 22) return 5; // bare rocky peak
-        return 3;                     // grass
-      }
-      if (surfaceY >= 30) return 7;        // snowy mountain: white all the way down
-      if (surfaceY >= 22) return 5;        // rocky peak: stone all the way down
-      if (gy >= surfaceY - 3) return 1;    // lowland: dirt layer under grass
-      return 5;                            // stone below
-    }
-
-    // Bulk insert without triggering React updates — caller must flush needsUpdate
-    function placeBulk(gx: number, gy: number, gz: number, colorIdx: number) {
-      const k = key(gx, gy, gz);
-      if (voxelData.has(k)) return;
-      const mesh = instanceMeshes[colorIdx];
-      const instanceIdx = mesh.count;
-      tmpMatrix.setPosition(gx, gy + 0.5, gz);
-      mesh.setMatrixAt(instanceIdx, tmpMatrix);
-      mesh.count++;
-      voxelData.set(k, { colorIdx, instanceIdx });
-      instanceKeys[colorIdx][instanceIdx] = k;
-    }
-
-    // 0=red(trunk)  3=green(leaves)
-    function placeTree(gx: number, surfaceY: number, gz: number) {
-      const trunkH = 4 + Math.floor(hash2(gx * 3.1, gz * 7.3) * 2); // 4 or 5, seeded
-
-      // Trunk
-      for (let y = surfaceY + 1; y <= surfaceY + trunkH; y++) {
-        placeBulk(gx, y, gz, 0);
-      }
-
-      // Canopy — blocky Minecraft-style layers around the trunk top
-      const top = surfaceY + trunkH;
-      const layers: Array<{ dy: number; r: number; trim: boolean }> = [
-        { dy: -1, r: 1, trim: false }, // 3×3 collar
-        { dy:  0, r: 2, trim: true  }, // 5×5 minus corners
-        { dy:  1, r: 2, trim: true  }, // 5×5 minus corners
-        { dy:  2, r: 1, trim: false }, // 3×3 cap
-      ];
-      for (const { dy, r, trim } of layers) {
-        for (let dx = -r; dx <= r; dx++) {
-          for (let dz = -r; dz <= r; dz++) {
-            if (trim && Math.abs(dx) === r && Math.abs(dz) === r) continue;
-            placeBulk(gx + dx, top + dy, gz + dz, 2);
-          }
-        }
-      }
-    }
-
-    function generateLandscape() {
-      clearAllVoxels();
-
-      const seed = Math.random() * 100;
-      const SIZE = 400;
-      const HALF = SIZE / 2;
-      const MIN_H = 1;
-      const MAX_H = 40;
-
-      // Pass 1: compute all surface heights into a flat array
-      const heights = new Int32Array(SIZE * SIZE);
-      for (let gx = -HALF; gx < HALF; gx++) {
-        for (let gz = -HALF; gz < HALF; gz++) {
-          const n = fbm(gx * 0.018 + seed, gz * 0.018 + seed);
-          // Terrain height from noise (same as before)
-          let height: number;
-          if (n < 0.25) {
-            height = 1 + Math.floor((n / 0.25) * 2);
-          } else if (n < 0.50) {
-            height = 4 + Math.floor(((n - 0.25) / 0.25) * 3);
-          } else {
-            height = 7 + Math.floor(Math.pow((n - 0.50) / 0.50, 1.5) * 73);
-          }
-          // Island mask: smooth fade starting at 70% radius so terrain reaches
-          // sea level well before the grid boundary — no hard edge visible.
-          const ddx = gx / HALF, ddz = gz / HALF;
-          const dist = Math.sqrt(ddx * ddx + ddz * ddz);
-          const mask = Math.max(0, 1 - Math.max(0, dist - 0.70) / 0.25);
-          height = Math.max(1, Math.round(height * mask + 1 * (1 - mask)));
-          heights[(gx + HALF) * SIZE + (gz + HALF)] = height;
-        }
-      }
-      const h = (gx: number, gz: number) =>
-        gx < -HALF || gx >= HALF || gz < -HALF || gz >= HALF
-          ? 0
-          : heights[(gx + HALF) * SIZE + (gz + HALF)];
-
-      // Pass 2: place only voxels with at least one exposed face (surface culling)
-      const treeSites: Array<[number, number, number]> = [];
-
-      for (let gx = -HALF; gx < HALF; gx++) {
-        for (let gz = -HALF; gz < HALF; gz++) {
-          const surfaceY = h(gx, gz);
-          const hN = h(gx, gz - 1), hS = h(gx, gz + 1);
-          const hE = h(gx + 1, gz), hW = h(gx - 1, gz);
-
-          for (let gy = 0; gy <= surfaceY; gy++) {
-            // Top face always visible; side face visible if neighbor is lower
-            if (gy === surfaceY || gy > hN || gy > hS || gy > hE || gy > hW) {
-              placeBulk(gx, gy, gz, terrainColor(gy, surfaceY));
-            }
-          }
-
-          const isGrass = surfaceY >= WATER_LEVEL && surfaceY < 28;
-          const notEdge = Math.abs(gx) < HALF - 3 && Math.abs(gz) < HALF - 3;
-          if (isGrass && notEdge && hash2(gx * 1.7 + seed, gz * 2.3 + seed) < 0.0016) {
-            treeSites.push([gx, surfaceY, gz]);
-          }
-        }
-      }
-
-      for (const [gx, sy, gz] of treeSites) placeTree(gx, sy, gz);
-
-      // Pass 3: fill water in columns below WATER_LEVEL
-      const waterMatrix = new THREE.Matrix4();
-      for (let gx = -HALF; gx < HALF; gx++) {
-        for (let gz = -HALF; gz < HALF; gz++) {
-          const surfaceY = h(gx, gz);
-          if (surfaceY < WATER_LEVEL) {
-            // Fill from just above terrain up to water surface
-            for (let wy = surfaceY + 1; wy <= WATER_LEVEL; wy++) {
-              waterMatrix.setPosition(gx, wy + 0.5, gz);
-              waterMesh.setMatrixAt(waterMesh.count++, waterMatrix);
-            }
-          }
-        }
-      }
-      waterMesh.instanceMatrix.needsUpdate = true;
-
-      instanceMeshes.forEach(m => { m.instanceMatrix.needsUpdate = true; });
-      renderer.shadowMap.needsUpdate = true;
-      const count = voxelData.size;
-      voxelCountRef.current = count;
-      setVoxelCount(count);
-
-      frustumSize = 120;
-      orbitTarget.set(0, 5, 0);
-      updateCamera();
-    }
-
-    generateRef.current = generateLandscape;
-
-    // ── Raycaster (DDA grid traversal — O(steps) not O(voxels)) ──────────
-    const raycaster = new THREE.Raycaster();
-    const mouse = new THREE.Vector2();
-
-    function setNDC(event: MouseEvent) {
-      mouse.x =  (event.clientX / window.innerWidth)  * 2 - 1;
-      mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
-    }
-
-    // Returns the first voxel hit and the face normal (pointing away from it)
-    function ddaRay(event: MouseEvent) {
-      setNDC(event);
-      raycaster.setFromCamera(mouse, camera);
-      const ro = raycaster.ray.origin;
-      const rd = raycaster.ray.direction;
-
-      // Always start DDA from y=MAX_H going downward, regardless of where the ray
-      // origin is. With a large orthographic frustum the origin can be inside or
-      // below the terrain, which would cause the DDA to either miss voxels or exit
-      // immediately. A negative t0 is fine — ortho rays extend in both directions.
-      const MAX_H = 85;
-      const t0 = rd.y < 0 ? (MAX_H - ro.y) / rd.y : 0;
-
-      let ox = ro.x + t0 * rd.x;
-      let oy = ro.y + t0 * rd.y;
-      let oz = ro.z + t0 * rd.z;
-
-      // Voxel (gx,gy,gz) occupies x∈[gx-0.5,gx+0.5], y∈[gy,gy+1], z∈[gz-0.5,gz+0.5]
-      let gx = Math.round(ox);
-      let gy = Math.floor(oy);
-      let gz = Math.round(oz);
-
-      const sx = rd.x > 0 ? 1 : rd.x < 0 ? -1 : 0;
-      const sy = rd.y > 0 ? 1 : rd.y < 0 ? -1 : 0;
-      const sz = rd.z > 0 ? 1 : rd.z < 0 ? -1 : 0;
-
-      let tMaxX = sx ? ((gx + sx * 0.5) - ox) / rd.x : Infinity;
-      let tMaxY = sy ? ((gy + (sy > 0 ? 1 : 0)) - oy) / rd.y : Infinity;
-      let tMaxZ = sz ? ((gz + sz * 0.5) - oz) / rd.z : Infinity;
-
-      const tDX = sx ? 1 / Math.abs(rd.x) : Infinity;
-      const tDY = sy ? 1 / Math.abs(rd.y) : Infinity;
-      const tDZ = sz ? 1 / Math.abs(rd.z) : Infinity;
-
-      let nx = 0, ny = 0, nz = 0;
-
-      for (let i = 0; i < 512; i++) {
-        if (gy >= 0 && gy <= MAX_H) {
-          const k = key(gx, gy, gz);
-          if (voxelData.has(k)) return { k, gx, gy, gz, nx, ny, nz };
-        }
-        if (gy < -1) break;
-
-        if (tMaxX < tMaxY && tMaxX < tMaxZ) {
-          gx += sx; nx = -sx; ny = 0; nz = 0; tMaxX += tDX;
-        } else if (tMaxY < tMaxZ) {
-          gy += sy; nx = 0; ny = -sy; nz = 0; tMaxY += tDY;
-        } else {
-          gz += sz; nx = 0; ny = 0; nz = -sz; tMaxZ += tDZ;
-        }
-      }
-      return null;
-    }
-
-    function getPlacementTarget(event: MouseEvent) {
-      const hit = ddaRay(event);
-      if (hit) return { gx: hit.gx + hit.nx, gy: hit.gy + hit.ny, gz: hit.gz + hit.nz };
-
-      // Fall back to ground plane (y=0) analytical intersection
-      setNDC(event);
-      raycaster.setFromCamera(mouse, camera);
-      const ro = raycaster.ray.origin;
-      const rd = raycaster.ray.direction;
-      if (rd.y < 0 && ro.y > 0) {
-        const t = -ro.y / rd.y;
-        return { gx: Math.round(ro.x + t * rd.x), gy: 0, gz: Math.round(ro.z + t * rd.z) };
-      }
-      return null;
-    }
-
-    function getRemoveTarget(event: MouseEvent) {
-      const hit = ddaRay(event);
-      if (!hit) return null;
-      const data = voxelData.get(hit.k);
-      return data ?? null;
-    }
-
-    // ── Orbit drag state ──────────────────────────────────────────────────
+    // ── Drag / orbit state ────────────────────────────────────────────────
     let dragging = false;
-    let dragMeta = false;
-    let dragX = 0;
-    let dragY = 0;
-    let dragStartX = 0;
-    let dragStartY = 0;
+    let dragX = 0, dragY = 0;
+    let dragStartX = 0, dragStartY = 0;
     let dragMoved = false;
-
-    // Pivot for cursor-locked orbit: the hit voxel's position in camera-space
-    // components (a = right, b = up, c = forward), measured at drag start.
-    // Keeping these fixed while azimuth/elevation change means the voxel stays
-    // at the same screen pixel throughout the drag.
     let dragPivot: THREE.Vector3 | null = null;
     let dragPivotA = 0, dragPivotB = 0, dragPivotC = 0;
 
-    // Returns the camera's orthonormal basis from current azimuth/elevation.
-    function cameraBasis() {
-      const sinAz = Math.sin(azimuth), cosAz = Math.cos(azimuth);
-      const sinEl = Math.sin(elevation), cosEl = Math.cos(elevation);
-      return {
-        right:   new THREE.Vector3(cosAz, 0, -sinAz),
-        up:      new THREE.Vector3(-sinEl * sinAz, cosEl, -sinEl * cosAz),
-        forward: new THREE.Vector3(-cosEl * sinAz, -sinEl, -cosEl * cosAz),
-      };
-    }
-
     // ── Mouse handlers ────────────────────────────────────────────────────
     function onMouseDown(event: MouseEvent) {
-      if (event.button === 0) {
-        dragging = true;
-        dragMeta = event.metaKey;
-        dragX = event.clientX;
-        dragY = event.clientY;
-        dragStartX = event.clientX;
-        dragStartY = event.clientY;
-        dragMoved = false;
+      if (event.button !== 0) return;
+      dragging = true;
+      dragX = dragStartX = event.clientX;
+      dragY = dragStartY = event.clientY;
+      dragMoved = false;
 
-        // Always set up cursor-locked orbit pivot on any drag.
-        const hit = ddaRay(event);
-        if (hit) {
-          const H = new THREE.Vector3(hit.gx, hit.gy + 0.5, hit.gz);
-          const { right, up, forward } = cameraBasis();
-          const camToH = H.clone().sub(camera.position);
-          dragPivot  = H;
-          dragPivotA = camToH.dot(right);
-          dragPivotB = camToH.dot(up);
-          dragPivotC = camToH.dot(forward);
-        } else {
-          dragPivot = null;
-        }
+      const hit = ddaRay(event, orbit.camera, world);
+      if (hit) {
+        const H = new THREE.Vector3(hit.gx, hit.gy + 0.5, hit.gz);
+        const { right, up, forward } = orbit.basis();
+        const camToH = H.clone().sub(orbit.camera.position);
+        dragPivot  = H;
+        dragPivotA = camToH.dot(right);
+        dragPivotB = camToH.dot(up);
+        dragPivotC = camToH.dot(forward);
+      } else {
+        dragPivot = null;
       }
     }
 
@@ -574,33 +146,18 @@ export default function VoxelGame() {
       if (dragging) {
         const dx = event.clientX - dragX;
         const dy = event.clientY - dragY;
-        if (Math.abs(event.clientX - dragStartX) > 4 || Math.abs(event.clientY - dragStartY) > 4) dragMoved = true;
+        if (Math.abs(event.clientX - dragStartX) > 4 || Math.abs(event.clientY - dragStartY) > 4) {
+          dragMoved = true;
+        }
         if (dragMoved) {
-          azimuth   -= dx * 0.008;
-          elevation  = Math.max(0.05, Math.min(Math.PI / 2 - 0.05, elevation + dy * 0.008));
+          orbit.azimuth   -= dx * 0.008;
+          orbit.elevation  = Math.max(0.05, Math.min(Math.PI / 2 - 0.05, orbit.elevation + dy * 0.008));
 
           if (dragPivot) {
-            // Keep the pivot voxel at the same screen position:
-            // place the camera so that pivot = camPos + a*right + b*up + c*forward.
-            const { right, up, forward } = cameraBasis();
-            const camPos = dragPivot.clone()
-              .addScaledVector(right,   -dragPivotA)
-              .addScaledVector(up,      -dragPivotB)
-              .addScaledVector(forward, -dragPivotC);
-            camera.position.copy(camPos);
-            // Update orbitTarget so standard updateCamera() stays in sync.
-            orbitTarget.copy(camPos).addScaledVector(forward, orbitDistance);
-            camera.lookAt(orbitTarget);
-            const a = aspect();
-            camera.left   = (-frustumSize * a) / 2;
-            camera.right  = ( frustumSize * a) / 2;
-            camera.top    =   frustumSize / 2;
-            camera.bottom =  -frustumSize / 2;
-            camera.updateProjectionMatrix();
+            orbit.orbitAroundPivot(dragPivot, dragPivotA, dragPivotB, dragPivotC);
           } else {
-            updateCamera();
+            orbit.update();
           }
-
           ghost.visible = false;
         }
         dragX = event.clientX;
@@ -608,10 +165,10 @@ export default function VoxelGame() {
         return;
       }
 
-      const target = getPlacementTarget(event);
+      const target = getPlacementTarget(event, orbit.camera, world, groundPlane);
       if (!target) { ghost.visible = false; return; }
       const { gx, gy, gz } = target;
-      if (voxelData.has(key(gx, gy, gz))) { ghost.visible = false; return; }
+      if (world.voxelData.has(world.key(gx, gy, gz))) { ghost.visible = false; return; }
       ghost.position.set(gx, gy + 0.5, gz);
       ghost.visible = true;
     }
@@ -623,12 +180,18 @@ export default function VoxelGame() {
     function onClick(event: MouseEvent) {
       if (event.button !== 0 || dragMoved) return;
       if (event.metaKey) {
-        const target = getRemoveTarget(event);
-        if (target) removeVoxel(target.colorIdx, target.instanceIdx);
-        ghost.visible = false;
+        const target = getRemoveTarget(event, orbit.camera, world);
+        if (target) {
+          world.removeVoxel(target.colorIdx, target.instanceIdx);
+          setVoxelCount(world.count);
+          ghost.visible = false;
+        }
       } else {
-        const target = getPlacementTarget(event);
-        if (target) addVoxel(target.gx, target.gy, target.gz);
+        const target = getPlacementTarget(event, orbit.camera, world, groundPlane);
+        if (target) {
+          world.addVoxel(target.gx, target.gy, target.gz, activeColorRef.current);
+          setVoxelCount(world.count);
+        }
       }
     }
 
@@ -639,25 +202,17 @@ export default function VoxelGame() {
     function onWheel(event: WheelEvent) {
       event.preventDefault();
       if (event.ctrlKey) {
-        const oldSize = frustumSize;
-        frustumSize = Math.max(4, Math.min(300, frustumSize + event.deltaY * 0.9));
-        // Pan orbitTarget so the world point under the cursor stays fixed.
-        const nx =  (event.clientX / window.innerWidth)  * 2 - 1;
-        const ny = -(event.clientY / window.innerHeight) * 2 + 1;
-        const { right, up } = cameraBasis();
-        const shift = (oldSize - frustumSize) / 2;
-        orbitTarget.addScaledVector(right, nx * shift * aspect());
-        orbitTarget.addScaledVector(up,    ny * shift);
-        updateCamera();
+        const ndcX =  (event.clientX / window.innerWidth)  * 2 - 1;
+        const ndcY = -(event.clientY / window.innerHeight) * 2 + 1;
+        orbit.zoom(event.deltaY * 0.9, ndcX, ndcY);
       } else {
-        pan(event.deltaX, event.deltaY);
+        orbit.pan(event.deltaX, event.deltaY);
       }
     }
 
-    // ── Resize ────────────────────────────────────────────────────────────
     function onResize() {
       renderer.setSize(window.innerWidth, window.innerHeight);
-      updateCamera();
+      orbit.update();
     }
 
     window.addEventListener('mousedown',   onMouseDown);
@@ -672,7 +227,7 @@ export default function VoxelGame() {
     let animId: number;
     function animate() {
       animId = requestAnimationFrame(animate);
-      renderer.render(scene, camera);
+      renderer.render(scene, orbit.camera);
     }
     animate();
 
@@ -694,62 +249,13 @@ export default function VoxelGame() {
   return (
     <div style={{ width: '100vw', height: '100vh', position: 'relative', overflow: 'hidden' }}>
       <div ref={mountRef} style={{ width: '100%', height: '100%' }} />
-
-      <div style={{
-        position: 'fixed', top: 12, left: 12,
-        background: 'rgba(0,0,0,0.55)', color: '#fff',
-        padding: '8px 12px', borderRadius: 8, fontSize: 13, lineHeight: 1.7,
-        pointerEvents: 'none', userSelect: 'none',
-      }}>
-        <div>Click — place voxel</div>
-        <div>⌘ click — remove voxel</div>
-        <div>Drag — rotate</div>
-        <div>Two-finger drag — pan</div>
-        <div>Pinch — zoom</div>
-      </div>
-
-      <div style={{
-        position: 'fixed', top: 12, right: 12,
-        display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8,
-      }}>
-        <div style={{
-          background: 'rgba(0,0,0,0.55)', color: '#fff',
-          padding: '6px 12px', borderRadius: 8, fontSize: 13,
-          pointerEvents: 'none', userSelect: 'none',
-        }}>
-          Voxels: {voxelCount}
-        </div>
-        <button
-          onClick={() => generateRef.current?.()}
-          style={{
-            background: 'rgba(0,0,0,0.55)', color: '#fff',
-            border: '1px solid rgba(255,255,255,0.3)',
-            padding: '6px 14px', borderRadius: 8, fontSize: 13,
-            cursor: 'pointer',
-          }}
-        >
-          Generate landscape
-        </button>
-      </div>
-
-      <div style={{
-        position: 'fixed', bottom: 20, left: '50%', transform: 'translateX(-50%)',
-        display: 'flex', gap: 8,
-        background: 'rgba(0,0,0,0.55)', padding: '8px 12px', borderRadius: 12,
-      }}>
-        {COLORS.map((color, i) => (
-          <div
-            key={i}
-            onClick={() => { activeColorRef.current = i; setActiveColor(i); }}
-            style={{
-              width: 32, height: 32, borderRadius: 6, cursor: 'pointer',
-              background: `#${color.toString(16).padStart(6, '0')}`,
-              border: activeColor === i ? '3px solid #fff' : '3px solid transparent',
-              boxSizing: 'border-box',
-            }}
-          />
-        ))}
-      </div>
+      <GameUI
+        voxelCount={voxelCount}
+        activeColor={activeColor}
+        colors={COLORS}
+        onColorSelect={(i) => { activeColorRef.current = i; setActiveColor(i); }}
+        onGenerate={() => generateRef.current?.()}
+      />
     </div>
   );
 }

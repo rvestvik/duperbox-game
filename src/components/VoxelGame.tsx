@@ -7,6 +7,7 @@ import { OrbitCamera } from '../lib/OrbitCamera';
 import { VoxelWorld } from '../lib/VoxelWorld';
 import { generateLandscape } from '../lib/terrain';
 import { ddaRay, getPlacementTarget, getRemoveTarget } from '../lib/raycast';
+import { Character } from '../lib/Character';
 import { GameUI } from './GameUI';
 
 function createEdgeTexture(): THREE.CanvasTexture {
@@ -102,13 +103,19 @@ export default function VoxelGame() {
     ghost.visible = false;
     scene.add(ghost);
 
+    // ── Character ─────────────────────────────────────────────────────────
+    let character: Character | null = null;
+
     // ── Generate landscape ────────────────────────────────────────────────
     function generate() {
-      const { frustumSize, orbitTarget } = generateLandscape(world);
+      const { frustumSize, orbitTarget, getHeight } = generateLandscape(world);
       orbit.frustumSize = frustumSize;
       orbit.orbitTarget.copy(orbitTarget);
       orbit.update();
       setVoxelCount(world.count);
+
+      character?.dispose(scene);
+      character = new Character(scene, getHeight);
     }
     generateRef.current = generate;
 
@@ -224,9 +231,12 @@ export default function VoxelGame() {
     window.addEventListener('resize',      onResize);
 
     // ── Render loop ───────────────────────────────────────────────────────
+    const clock = new THREE.Clock();
     let animId: number;
     function animate() {
       animId = requestAnimationFrame(animate);
+      const dt = Math.min(clock.getDelta(), 0.1); // cap dt to avoid large jumps
+      character?.update(dt);
       renderer.render(scene, orbit.camera);
     }
     animate();
@@ -234,6 +244,7 @@ export default function VoxelGame() {
     // ── Cleanup ───────────────────────────────────────────────────────────
     return () => {
       cancelAnimationFrame(animId);
+      character?.dispose(scene);
       window.removeEventListener('mousedown',   onMouseDown);
       window.removeEventListener('mousemove',   onMouseMove);
       window.removeEventListener('mouseup',     onMouseUp);

@@ -41,7 +41,7 @@ function placeTree(gx: number, surfaceY: number, gz: number, world: VoxelWorld) 
 
 export function generateLandscape(
   world: VoxelWorld,
-): { frustumSize: number; orbitTarget: THREE.Vector3 } {
+): { frustumSize: number; orbitTarget: THREE.Vector3; getHeight: (gx: number, gz: number) => number } {
   world.clearAllVoxels();
 
   const seed = Math.random() * 100;
@@ -112,5 +112,5 @@ export function generateLandscape(
   world.waterMesh.instanceMatrix.needsUpdate = true;
   world.flushUpdates();
 
-  return { frustumSize: 120, orbitTarget: new THREE.Vector3(0, 5, 0) };
+  return { frustumSize: 120, orbitTarget: new THREE.Vector3(0, 5, 0), getHeight: h };
 }

@@ -374,10 +374,12 @@ export default function VoxelGame() {
       const ro = raycaster.ray.origin;
       const rd = raycaster.ray.direction;
 
-      // If ray origin is above terrain, advance to just below MAX_H to skip empty sky.
-      // If already within or below terrain range, start from the origin itself.
+      // Always start DDA from y=MAX_H going downward, regardless of where the ray
+      // origin is. With a large orthographic frustum the origin can be inside or
+      // below the terrain, which would cause the DDA to either miss voxels or exit
+      // immediately. A negative t0 is fine — ortho rays extend in both directions.
       const MAX_H = 42;
-      const t0 = (rd.y < 0 && ro.y > MAX_H) ? (MAX_H - ro.y) / rd.y : 0;
+      const t0 = rd.y < 0 ? (MAX_H - ro.y) / rd.y : 0;
 
       let ox = ro.x + t0 * rd.x;
       let oy = ro.y + t0 * rd.y;
@@ -402,7 +404,7 @@ export default function VoxelGame() {
 
       let nx = 0, ny = 0, nz = 0;
 
-      for (let i = 0; i < 256; i++) {
+      for (let i = 0; i < 512; i++) {
         if (gy >= 0 && gy <= MAX_H) {
           const k = key(gx, gy, gz);
           if (voxelData.has(k)) return { k, gx, gy, gz, nx, ny, nz };

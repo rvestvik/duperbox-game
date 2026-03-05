@@ -594,7 +594,15 @@ export default function VoxelGame() {
     function onWheel(event: WheelEvent) {
       event.preventDefault();
       if (event.ctrlKey) {
+        const oldSize = frustumSize;
         frustumSize = Math.max(4, Math.min(300, frustumSize + event.deltaY * 0.3));
+        // Pan orbitTarget so the world point under the cursor stays fixed.
+        const nx =  (event.clientX / window.innerWidth)  * 2 - 1;
+        const ny = -(event.clientY / window.innerHeight) * 2 + 1;
+        const { right, up } = cameraBasis();
+        const shift = (oldSize - frustumSize) / 2;
+        orbitTarget.addScaledVector(right, nx * shift * aspect());
+        orbitTarget.addScaledVector(up,    ny * shift);
         updateCamera();
       } else {
         pan(event.deltaX, event.deltaY);

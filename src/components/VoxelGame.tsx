@@ -145,7 +145,7 @@ export default function VoxelGame() {
     const edgeCtx = edgeCanvas.getContext('2d')!;
     edgeCtx.fillStyle = '#ffffff';
     edgeCtx.fillRect(0, 0, EDGE_TEX_SIZE, EDGE_TEX_SIZE);
-    const edgePx = 1;
+    const edgePx = 2;
     edgeCtx.fillStyle = 'rgba(0,0,0,0.55)';
     edgeCtx.fillRect(0, 0, EDGE_TEX_SIZE, edgePx);           // top
     edgeCtx.fillRect(0, EDGE_TEX_SIZE - edgePx, EDGE_TEX_SIZE, edgePx); // bottom

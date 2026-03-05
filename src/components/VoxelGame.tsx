@@ -103,8 +103,8 @@ export default function VoxelGame() {
     ghost.visible = false;
     scene.add(ghost);
 
-    // ── Character ─────────────────────────────────────────────────────────
-    let character: Character | null = null;
+    // ── Characters ────────────────────────────────────────────────────────
+    let characters: Character[] = [];
 
     // ── Generate landscape ────────────────────────────────────────────────
     function generate() {
@@ -114,8 +114,8 @@ export default function VoxelGame() {
       orbit.update();
       setVoxelCount(world.count);
 
-      character?.dispose(scene);
-      character = new Character(scene, getHeight);
+      characters.forEach(c => c.dispose(scene));
+      characters = Array.from({ length: 50 }, () => new Character(scene, getHeight));
     }
     generateRef.current = generate;
 
@@ -236,7 +236,7 @@ export default function VoxelGame() {
     function animate() {
       animId = requestAnimationFrame(animate);
       const dt = Math.min(clock.getDelta(), 0.1); // cap dt to avoid large jumps
-      character?.update(dt);
+      characters.forEach(c => c.update(dt));
       renderer.render(scene, orbit.camera);
     }
     animate();
@@ -244,7 +244,7 @@ export default function VoxelGame() {
     // ── Cleanup ───────────────────────────────────────────────────────────
     return () => {
       cancelAnimationFrame(animId);
-      character?.dispose(scene);
+      characters.forEach(c => c.dispose(scene));
       window.removeEventListener('mousedown',   onMouseDown);
       window.removeEventListener('mousemove',   onMouseMove);
       window.removeEventListener('mouseup',     onMouseUp);

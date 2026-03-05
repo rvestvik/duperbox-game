@@ -349,10 +349,20 @@ export default function VoxelGame() {
       const heights = new Int32Array(SIZE * SIZE);
       for (let gx = -HALF; gx < HALF; gx++) {
         for (let gz = -HALF; gz < HALF; gz++) {
-          const n = fbm(gx * 0.035 + seed, gz * 0.035 + seed);
-          // Power curve > 1 flattens most of the map; only peaks stay high
-          const shaped = Math.pow(n, 2.2);
-          heights[(gx + HALF) * SIZE + (gz + HALF)] = MIN_H + Math.floor(shaped * (MAX_H - MIN_H));
+          const n = fbm(gx * 0.025 + seed, gz * 0.025 + seed);
+          // Three explicit zones:
+          //   n < 0.12  → depressions (lake beds, height 1-2)
+          //   n < 0.82  → flat plains just above water (height 4-7)
+          //   n >= 0.82 → mountains (height 7-40)
+          let height: number;
+          if (n < 0.12) {
+            height = 1 + Math.floor((n / 0.12) * 2);
+          } else if (n < 0.82) {
+            height = 4 + Math.floor(((n - 0.12) / 0.70) * 3);
+          } else {
+            height = 7 + Math.floor(Math.pow((n - 0.82) / 0.18, 1.5) * 33);
+          }
+          heights[(gx + HALF) * SIZE + (gz + HALF)] = height;
         }
       }
       const h = (gx: number, gz: number) =>
@@ -376,7 +386,7 @@ export default function VoxelGame() {
             }
           }
 
-          const isGrass = surfaceY < 28;
+          const isGrass = surfaceY >= WATER_LEVEL && surfaceY < 28;
           const notEdge = Math.abs(gx) < HALF - 3 && Math.abs(gz) < HALF - 3;
           if (isGrass && notEdge && hash2(gx * 1.7 + seed, gz * 2.3 + seed) < 0.0016) {
             treeSites.push([gx, surfaceY, gz]);

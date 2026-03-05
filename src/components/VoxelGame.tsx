@@ -105,11 +105,11 @@ export default function VoxelGame() {
 
     // ── Lighting ──────────────────────────────────────────────────────────
     // Sky blue from above, warm earth from below
-    const hemiLight = new THREE.HemisphereLight(0x90b8d4, 0x5a3d1a, 1.6);
+    const hemiLight = new THREE.HemisphereLight(0x90b8d4, 0x5a3d1a, 2.4);
     scene.add(hemiLight);
 
     // Warm sun
-    const dirLight = new THREE.DirectionalLight(0xfff4e0, 1.4);
+    const dirLight = new THREE.DirectionalLight(0xfff4e0, 0.8);
     dirLight.position.set(40, 200, 30);
     dirLight.castShadow = true;
     dirLight.shadow.mapSize.width = 2048;
@@ -121,8 +121,8 @@ export default function VoxelGame() {
     dirLight.shadow.camera.top = 200;
     dirLight.shadow.camera.bottom = -200;
     dirLight.shadow.bias = -0.0003;
-    dirLight.shadow.radius = 12;
-    dirLight.shadow.blurSamples = 16;
+    dirLight.shadow.radius = 32;
+    dirLight.shadow.blurSamples = 25;
     scene.add(dirLight);
 
     // ── Ground plane ──────────────────────────────────────────────────────

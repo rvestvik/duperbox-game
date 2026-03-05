@@ -633,7 +633,7 @@ export default function VoxelGame() {
       event.preventDefault();
       if (event.ctrlKey) {
         const oldSize = frustumSize;
-        frustumSize = Math.max(4, Math.min(300, frustumSize + event.deltaY * 0.3));
+        frustumSize = Math.max(4, Math.min(300, frustumSize + event.deltaY * 0.9));
         // Pan orbitTarget so the world point under the cursor stays fixed.
         const nx =  (event.clientX / window.innerWidth)  * 2 - 1;
         const ny = -(event.clientY / window.innerHeight) * 2 + 1;

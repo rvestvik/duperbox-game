@@ -173,6 +173,20 @@ export default function VoxelGame() {
       return mesh;
     });
 
+    // ── Water ─────────────────────────────────────────────────────────────
+    const WATER_LEVEL = 3; // grid y of the water surface
+    const waterMat = new THREE.MeshStandardMaterial({
+      color: 0x1a6fa8, transparent: true, opacity: 0.55,
+      roughness: 0.05, metalness: 0.15, depthWrite: false,
+    });
+    const waterMesh = new THREE.InstancedMesh(boxGeo, waterMat, 500_000);
+    waterMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    waterMesh.count = 0;
+    waterMesh.castShadow = false;
+    waterMesh.receiveShadow = false;
+    waterMesh.frustumCulled = false;
+    scene.add(waterMesh);
+
     // ── Voxel data ────────────────────────────────────────────────────────
     // key → { colorIdx, instanceIdx }
     const voxelData = new Map<string, { colorIdx: number; instanceIdx: number }>();
@@ -238,6 +252,8 @@ export default function VoxelGame() {
         mesh.instanceMatrix.needsUpdate = true;
         instanceKeys[ci].length = 0;
       });
+      waterMesh.count = 0;
+      waterMesh.instanceMatrix.needsUpdate = true;
       voxelData.clear();
     }
 
@@ -369,6 +385,22 @@ export default function VoxelGame() {
       }
 
       for (const [gx, sy, gz] of treeSites) placeTree(gx, sy, gz);
+
+      // Pass 3: fill water in columns below WATER_LEVEL
+      const waterMatrix = new THREE.Matrix4();
+      for (let gx = -HALF; gx < HALF; gx++) {
+        for (let gz = -HALF; gz < HALF; gz++) {
+          const surfaceY = h(gx, gz);
+          if (surfaceY < WATER_LEVEL) {
+            // Fill from just above terrain up to water surface
+            for (let wy = surfaceY + 1; wy <= WATER_LEVEL; wy++) {
+              waterMatrix.setPosition(gx, wy + 0.5, gz);
+              waterMesh.setMatrixAt(waterMesh.count++, waterMatrix);
+            }
+          }
+        }
+      }
+      waterMesh.instanceMatrix.needsUpdate = true;
 
       instanceMeshes.forEach(m => { m.instanceMatrix.needsUpdate = true; });
       renderer.shadowMap.needsUpdate = true;

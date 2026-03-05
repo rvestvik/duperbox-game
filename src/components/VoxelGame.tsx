@@ -96,8 +96,8 @@ export default function VoxelGame() {
       const speed = frustumSize / window.innerHeight;
       const right = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 0);
       const up    = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 1);
-      orbitTarget.addScaledVector(right, -dx * speed);
-      orbitTarget.addScaledVector(up,     dy * speed);
+      orbitTarget.addScaledVector(right,  dx * speed);
+      orbitTarget.addScaledVector(up,    -dy * speed);
       updateCamera();
     }
 
@@ -547,27 +547,24 @@ export default function VoxelGame() {
         dragY = event.clientY;
         dragMoved = false;
 
-        // Record the world-space hit point in camera-space coordinates so the
-        // pivot orbit can keep that point at the same screen pixel.
-        if (event.metaKey) {
-          const hit = ddaRay(event);
-          if (hit) {
-            const H = new THREE.Vector3(hit.gx, hit.gy + 0.5, hit.gz);
-            const { right, up, forward } = cameraBasis();
-            const camToH = H.clone().sub(camera.position);
-            dragPivot  = H;
-            dragPivotA = camToH.dot(right);
-            dragPivotB = camToH.dot(up);
-            dragPivotC = camToH.dot(forward);
-          } else {
-            dragPivot = null;
-          }
+        // Always set up cursor-locked orbit pivot on any drag.
+        const hit = ddaRay(event);
+        if (hit) {
+          const H = new THREE.Vector3(hit.gx, hit.gy + 0.5, hit.gz);
+          const { right, up, forward } = cameraBasis();
+          const camToH = H.clone().sub(camera.position);
+          dragPivot  = H;
+          dragPivotA = camToH.dot(right);
+          dragPivotB = camToH.dot(up);
+          dragPivotC = camToH.dot(forward);
+        } else {
+          dragPivot = null;
         }
       }
     }
 
     function onMouseMove(event: MouseEvent) {
-      if (dragging && dragMeta) {
+      if (dragging) {
         const dx = event.clientX - dragX;
         const dy = event.clientY - dragY;
         if (Math.abs(dx) > 4 || Math.abs(dy) > 4) dragMoved = true;
@@ -603,8 +600,6 @@ export default function VoxelGame() {
         dragY = event.clientY;
         return;
       }
-
-      if (event.metaKey) { ghost.visible = false; return; }
 
       const target = getPlacementTarget(event);
       if (!target) { ghost.visible = false; return; }
@@ -701,7 +696,7 @@ export default function VoxelGame() {
       }}>
         <div>Click — place voxel</div>
         <div>⌘ click — remove voxel</div>
-        <div>⌘ drag — rotate</div>
+        <div>Drag — rotate</div>
         <div>Two-finger drag — pan</div>
         <div>Pinch — zoom</div>
       </div>

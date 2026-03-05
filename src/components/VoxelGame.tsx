@@ -351,10 +351,7 @@ export default function VoxelGame() {
       for (let gx = -HALF; gx < HALF; gx++) {
         for (let gz = -HALF; gz < HALF; gz++) {
           const n = fbm(gx * 0.018 + seed, gz * 0.018 + seed);
-          // Three explicit zones:
-          //   n < 0.12  → depressions (lake beds, height 1-2)
-          //   n < 0.50  → flat plains just above water (height 4-7)
-          //   n >= 0.50 → hills/mountains (~50% of terrain, height 7-80)
+          // Terrain height from noise (same as before)
           let height: number;
           if (n < 0.25) {
             height = 1 + Math.floor((n / 0.25) * 2);
@@ -363,6 +360,12 @@ export default function VoxelGame() {
           } else {
             height = 7 + Math.floor(Math.pow((n - 0.50) / 0.50, 1.5) * 73);
           }
+          // Island mask: smooth fade starting at 70% radius so terrain reaches
+          // sea level well before the grid boundary — no hard edge visible.
+          const ddx = gx / HALF, ddz = gz / HALF;
+          const dist = Math.sqrt(ddx * ddx + ddz * ddz);
+          const mask = Math.max(0, 1 - Math.max(0, dist - 0.70) / 0.25);
+          height = Math.max(1, Math.round(height * mask + 1 * (1 - mask)));
           heights[(gx + HALF) * SIZE + (gz + HALF)] = height;
         }
       }

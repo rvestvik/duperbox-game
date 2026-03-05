@@ -349,18 +349,18 @@ export default function VoxelGame() {
       const heights = new Int32Array(SIZE * SIZE);
       for (let gx = -HALF; gx < HALF; gx++) {
         for (let gz = -HALF; gz < HALF; gz++) {
-          const n = fbm(gx * 0.025 + seed, gz * 0.025 + seed);
+          const n = fbm(gx * 0.018 + seed, gz * 0.018 + seed);
           // Three explicit zones:
           //   n < 0.12  → depressions (lake beds, height 1-2)
-          //   n < 0.82  → flat plains just above water (height 4-7)
-          //   n >= 0.82 → mountains (height 7-40)
+          //   n < 0.50  → flat plains just above water (height 4-7)
+          //   n >= 0.50 → hills/mountains (~50% of terrain, height 7-80)
           let height: number;
           if (n < 0.12) {
             height = 1 + Math.floor((n / 0.12) * 2);
-          } else if (n < 0.82) {
-            height = 4 + Math.floor(((n - 0.12) / 0.70) * 3);
+          } else if (n < 0.50) {
+            height = 4 + Math.floor(((n - 0.12) / 0.38) * 3);
           } else {
-            height = 7 + Math.floor(Math.pow((n - 0.82) / 0.18, 1.5) * 33);
+            height = 7 + Math.floor(Math.pow((n - 0.50) / 0.50, 1.5) * 73);
           }
           heights[(gx + HALF) * SIZE + (gz + HALF)] = height;
         }
@@ -445,7 +445,7 @@ export default function VoxelGame() {
       // origin is. With a large orthographic frustum the origin can be inside or
       // below the terrain, which would cause the DDA to either miss voxels or exit
       // immediately. A negative t0 is fine — ortho rays extend in both directions.
-      const MAX_H = 42;
+      const MAX_H = 85;
       const t0 = rd.y < 0 ? (MAX_H - ro.y) / rd.y : 0;
 
       let ox = ro.x + t0 * rd.x;

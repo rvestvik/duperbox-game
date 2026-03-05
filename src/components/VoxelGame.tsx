@@ -63,6 +63,7 @@ export default function VoxelGame() {
     // ── Camera orbit state ────────────────────────────────────────────────
     let azimuth = Math.PI / 4;
     let elevation = Math.atan(1 / Math.sqrt(2));
+    let orbitDistance = CAMERA_DISTANCE;
     let frustumSize = 20;
     const orbitTarget = new THREE.Vector3(0, 0, 0);
 
@@ -78,9 +79,9 @@ export default function VoxelGame() {
     );
 
     function updateCamera() {
-      const x = CAMERA_DISTANCE * Math.cos(elevation) * Math.sin(azimuth);
-      const y = CAMERA_DISTANCE * Math.sin(elevation);
-      const z = CAMERA_DISTANCE * Math.cos(elevation) * Math.cos(azimuth);
+      const x = orbitDistance * Math.cos(elevation) * Math.sin(azimuth);
+      const y = orbitDistance * Math.sin(elevation);
+      const z = orbitDistance * Math.cos(elevation) * Math.cos(azimuth);
       camera.position.set(orbitTarget.x + x, orbitTarget.y + y, orbitTarget.z + z);
       camera.lookAt(orbitTarget);
       const a = aspect();
@@ -461,16 +462,24 @@ export default function VoxelGame() {
         dragY = event.clientY;
         dragMoved = false;
 
-        // Rotate around the voxel under the cursor (or ground plane if none)
+        // Rotate around the voxel under the cursor without moving the camera.
+        // Recompute azimuth/elevation/orbitDistance from the current camera
+        // position to the new pivot so updateCamera() lands in the same spot.
         if (event.metaKey) {
           const hit = ddaRay(event);
-          if (hit) {
-            orbitTarget.set(hit.gx, hit.gy + 0.5, hit.gz);
-          } else {
-            const target = getPlacementTarget(event);
-            if (target) orbitTarget.set(target.gx, target.gy, target.gz);
+          const newTarget = hit
+            ? new THREE.Vector3(hit.gx, hit.gy + 0.5, hit.gz)
+            : (() => { const t = getPlacementTarget(event); return t ? new THREE.Vector3(t.gx, t.gy, t.gz) : null; })();
+
+          if (newTarget) {
+            const camPos = camera.position.clone();
+            orbitTarget.copy(newTarget);
+            const offset = camPos.sub(newTarget);
+            orbitDistance = offset.length();
+            elevation = Math.asin(offset.y / orbitDistance);
+            azimuth = Math.atan2(offset.x, offset.z);
+            updateCamera();
           }
-          updateCamera();
         }
       }
     }

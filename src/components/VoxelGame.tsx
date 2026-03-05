@@ -147,6 +147,7 @@ export default function VoxelGame() {
       mesh.count = 0;
       mesh.castShadow = true;
       mesh.receiveShadow = true;
+      mesh.frustumCulled = false; // bounding sphere is BoxGeometry(1,1,1) — useless for instanced meshes spanning the whole terrain
       scene.add(mesh);
       return mesh;
     });

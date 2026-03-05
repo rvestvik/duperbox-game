@@ -453,6 +453,24 @@ export default function VoxelGame() {
     let dragY = 0;
     let dragMoved = false;
 
+    // Pivot for cursor-locked orbit: the hit voxel's position in camera-space
+    // components (a = right, b = up, c = forward), measured at drag start.
+    // Keeping these fixed while azimuth/elevation change means the voxel stays
+    // at the same screen pixel throughout the drag.
+    let dragPivot: THREE.Vector3 | null = null;
+    let dragPivotA = 0, dragPivotB = 0, dragPivotC = 0;
+
+    // Returns the camera's orthonormal basis from current azimuth/elevation.
+    function cameraBasis() {
+      const sinAz = Math.sin(azimuth), cosAz = Math.cos(azimuth);
+      const sinEl = Math.sin(elevation), cosEl = Math.cos(elevation);
+      return {
+        right:   new THREE.Vector3(cosAz, 0, -sinAz),
+        up:      new THREE.Vector3(-sinEl * sinAz, cosEl, -sinEl * cosAz),
+        forward: new THREE.Vector3(-cosEl * sinAz, -sinEl, -cosEl * cosAz),
+      };
+    }
+
     // ── Mouse handlers ────────────────────────────────────────────────────
     function onMouseDown(event: MouseEvent) {
       if (event.button === 0) {
@@ -462,23 +480,20 @@ export default function VoxelGame() {
         dragY = event.clientY;
         dragMoved = false;
 
-        // Rotate around the voxel under the cursor without moving the camera.
-        // Recompute azimuth/elevation/orbitDistance from the current camera
-        // position to the new pivot so updateCamera() lands in the same spot.
+        // Record the world-space hit point in camera-space coordinates so the
+        // pivot orbit can keep that point at the same screen pixel.
         if (event.metaKey) {
           const hit = ddaRay(event);
-          const newTarget = hit
-            ? new THREE.Vector3(hit.gx, hit.gy + 0.5, hit.gz)
-            : (() => { const t = getPlacementTarget(event); return t ? new THREE.Vector3(t.gx, t.gy, t.gz) : null; })();
-
-          if (newTarget) {
-            const camPos = camera.position.clone();
-            orbitTarget.copy(newTarget);
-            const offset = camPos.sub(newTarget);
-            orbitDistance = offset.length();
-            elevation = Math.asin(offset.y / orbitDistance);
-            azimuth = Math.atan2(offset.x, offset.z);
-            updateCamera();
+          if (hit) {
+            const H = new THREE.Vector3(hit.gx, hit.gy + 0.5, hit.gz);
+            const { right, up, forward } = cameraBasis();
+            const camToH = H.clone().sub(camera.position);
+            dragPivot  = H;
+            dragPivotA = camToH.dot(right);
+            dragPivotB = camToH.dot(up);
+            dragPivotC = camToH.dot(forward);
+          } else {
+            dragPivot = null;
           }
         }
       }
@@ -492,7 +507,29 @@ export default function VoxelGame() {
         if (dragMoved) {
           azimuth   -= dx * 0.008;
           elevation  = Math.max(0.05, Math.min(Math.PI / 2 - 0.05, elevation + dy * 0.008));
-          updateCamera();
+
+          if (dragPivot) {
+            // Keep the pivot voxel at the same screen position:
+            // place the camera so that pivot = camPos + a*right + b*up + c*forward.
+            const { right, up, forward } = cameraBasis();
+            const camPos = dragPivot.clone()
+              .addScaledVector(right,   -dragPivotA)
+              .addScaledVector(up,      -dragPivotB)
+              .addScaledVector(forward, -dragPivotC);
+            camera.position.copy(camPos);
+            // Update orbitTarget so standard updateCamera() stays in sync.
+            orbitTarget.copy(camPos).addScaledVector(forward, orbitDistance);
+            camera.lookAt(orbitTarget);
+            const a = aspect();
+            camera.left   = (-frustumSize * a) / 2;
+            camera.right  = ( frustumSize * a) / 2;
+            camera.top    =   frustumSize / 2;
+            camera.bottom =  -frustumSize / 2;
+            camera.updateProjectionMatrix();
+          } else {
+            updateCamera();
+          }
+
           ghost.visible = false;
         }
         dragX = event.clientX;
@@ -511,7 +548,7 @@ export default function VoxelGame() {
     }
 
     function onMouseUp(event: MouseEvent) {
-      if (event.button === 0) dragging = false;
+      if (event.button === 0) { dragging = false; dragPivot = null; }
     }
 
     function onClick(event: MouseEvent) {

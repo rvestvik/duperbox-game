@@ -356,10 +356,10 @@ export default function VoxelGame() {
           //   n < 0.50  → flat plains just above water (height 4-7)
           //   n >= 0.50 → hills/mountains (~50% of terrain, height 7-80)
           let height: number;
-          if (n < 0.12) {
-            height = 1 + Math.floor((n / 0.12) * 2);
+          if (n < 0.25) {
+            height = 1 + Math.floor((n / 0.25) * 2);
           } else if (n < 0.50) {
-            height = 4 + Math.floor(((n - 0.12) / 0.38) * 3);
+            height = 4 + Math.floor(((n - 0.25) / 0.25) * 3);
           } else {
             height = 7 + Math.floor(Math.pow((n - 0.50) / 0.50, 1.5) * 73);
           }

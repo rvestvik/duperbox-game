@@ -4,25 +4,25 @@ import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 
 const COLORS = [
-  0xc0392b, // 0 — deep red       (paint)
-  0x7a5230, // 1 — rich dirt brown (terrain dirt)
-  0xd4ac0d, // 2 — golden yellow  (paint)
-  0x4a7c3f, // 3 — muted forest green (terrain grass)
-  0x2471a3, // 4 — deep ocean blue (paint)
-  0x9e9080, // 5 — warm stone      (terrain stone)
-  0x5a5048, // 6 — dark warm stone (terrain deep)
-  0xedf1f7, // 7 — cool snow white (terrain snow)
+  0xc0392b, // 0 — deep red          (paint / tree trunk)
+  0x9a6a42, // 1 — warm dirt brown   (terrain dirt)
+  0x4ab83a, // 2 — bright leaf green (tree canopy)
+  0x8b6914, // 3 — dry grass brown   (terrain grass)
+  0x3a8ec0, // 4 — sky blue          (paint)
+  0xbcb0a4, // 5 — light warm stone  (terrain stone)
+  0x7a6e66, // 6 — mid warm stone    (terrain deep)
+  0xedf1f7, // 7 — cool snow white   (terrain snow)
 ];
 
 // Per-color PBR roughness (matches material feel of each color)
 const ROUGHNESS = [
   0.90, // 0 red
   0.97, // 1 dirt
-  0.85, // 2 yellow
+  0.90, // 2 leaf green
   0.93, // 3 grass
   0.20, // 4 blue (slightly shiny)
   0.82, // 5 stone
-  0.72, // 6 deep stone
+  0.75, // 6 deep stone
   0.90, // 7 snow
 ];
 
@@ -51,7 +51,7 @@ export default function VoxelGame() {
     renderer.shadowMap.autoUpdate = false;  // re-triggered manually on changes
     renderer.shadowMap.needsUpdate = true;  // initialize shadow map on first frame
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.1;
+    renderer.toneMappingExposure = 1.25;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     mount.appendChild(renderer.domElement);
 
@@ -105,12 +105,12 @@ export default function VoxelGame() {
 
     // ── Lighting ──────────────────────────────────────────────────────────
     // Sky blue from above, warm earth from below
-    const hemiLight = new THREE.HemisphereLight(0x90b8d4, 0x5a3d1a, 1.4);
+    const hemiLight = new THREE.HemisphereLight(0x90b8d4, 0x5a3d1a, 1.6);
     scene.add(hemiLight);
 
     // Warm sun
     const dirLight = new THREE.DirectionalLight(0xfff4e0, 1.4);
-    dirLight.position.set(120, 180, 80);
+    dirLight.position.set(40, 200, 30);
     dirLight.castShadow = true;
     dirLight.shadow.mapSize.width = 2048;
     dirLight.shadow.mapSize.height = 2048;
@@ -293,7 +293,7 @@ export default function VoxelGame() {
         for (let dx = -r; dx <= r; dx++) {
           for (let dz = -r; dz <= r; dz++) {
             if (trim && Math.abs(dx) === r && Math.abs(dz) === r) continue;
-            placeBulk(gx + dx, top + dy, gz + dz, 3);
+            placeBulk(gx + dx, top + dy, gz + dz, 2);
           }
         }
       }

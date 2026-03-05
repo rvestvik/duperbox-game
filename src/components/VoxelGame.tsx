@@ -48,7 +48,8 @@ export default function VoxelGame() {
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    renderer.shadowMap.autoUpdate = false; // re-triggered manually on changes
+    renderer.shadowMap.autoUpdate = false;  // re-triggered manually on changes
+    renderer.shadowMap.needsUpdate = true;  // initialize shadow map on first frame
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.1;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -351,7 +352,7 @@ export default function VoxelGame() {
       voxelCountRef.current = count;
       setVoxelCount(count);
 
-      frustumSize = 200;
+      frustumSize = 120;
       orbitTarget.set(0, 5, 0);
       updateCamera();
     }
@@ -374,9 +375,10 @@ export default function VoxelGame() {
       const ro = raycaster.ray.origin;
       const rd = raycaster.ray.direction;
 
-      // Advance ray origin to terrain entry point (handles ro.y above or below MAX_H)
+      // If ray origin is above terrain, advance to just below MAX_H to skip empty sky.
+      // If already within or below terrain range, start from the origin itself.
       const MAX_H = 42;
-      const t0 = Math.abs(rd.y) > 1e-4 ? (MAX_H - ro.y) / rd.y : 0;
+      const t0 = (rd.y < 0 && ro.y > MAX_H) ? (MAX_H - ro.y) / rd.y : 0;
 
       let ox = ro.x + t0 * rd.x;
       let oy = ro.y + t0 * rd.y;

@@ -291,9 +291,10 @@ export default function VoxelGame() {
         if (surfaceY >= 22) return 5; // bare rocky peak
         return 3;                     // grass
       }
-      if (gy >= surfaceY - 3) return 1; // dirt
-      if (gy >= 3)            return 5; // stone
-      return 6;                         // dark deep stone
+      if (surfaceY >= 30) return 7;        // snowy mountain: white all the way down
+      if (surfaceY >= 22) return 5;        // rocky peak: stone all the way down
+      if (gy >= surfaceY - 3) return 1;    // lowland: dirt layer under grass
+      return 5;                            // stone below
     }
 
     // Bulk insert without triggering React updates — caller must flush needsUpdate

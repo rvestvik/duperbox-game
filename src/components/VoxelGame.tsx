@@ -8,6 +8,7 @@ import { VoxelWorld } from '../lib/VoxelWorld';
 import { generateLandscape } from '../lib/terrain';
 import { ddaRay, getPlacementTarget, getRemoveTarget } from '../lib/raycast';
 import { Character } from '../lib/Character';
+import { DynamiteManager } from '../lib/Dynamite';
 import { GameUI } from './GameUI';
 
 function createEdgeTexture(): THREE.CanvasTexture {
@@ -33,8 +34,10 @@ export default function VoxelGame() {
   const mountRef = useRef<HTMLDivElement>(null);
   const [voxelCount, setVoxelCount] = useState(0);
   const [activeColor, setActiveColor] = useState(0);
+  const [activeTool, setActiveTool] = useState<'voxel' | 'dynamite'>('voxel');
 
   const activeColorRef = useRef(0);
+  const activeToolRef = useRef<'voxel' | 'dynamite'>('voxel');
   const generateRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
@@ -102,6 +105,9 @@ export default function VoxelGame() {
     );
     ghost.visible = false;
     scene.add(ghost);
+
+    // ── Dynamite ──────────────────────────────────────────────────────────
+    const dynamite = new DynamiteManager(scene);
 
     // ── Characters ────────────────────────────────────────────────────────
     let characters: Character[] = [];
@@ -177,6 +183,9 @@ export default function VoxelGame() {
       const { gx, gy, gz } = target;
       if (world.voxelData.has(world.key(gx, gy, gz))) { ghost.visible = false; return; }
       ghost.position.set(gx, gy + 0.5, gz);
+      (ghost.material as THREE.MeshStandardMaterial).color.set(
+        activeToolRef.current === 'dynamite' ? 0xff2200 : 0x00ff88
+      );
       ghost.visible = true;
     }
 
@@ -193,6 +202,9 @@ export default function VoxelGame() {
           setVoxelCount(world.count);
           ghost.visible = false;
         }
+      } else if (activeToolRef.current === 'dynamite') {
+        const target = getPlacementTarget(event, orbit.camera, world, groundPlane);
+        if (target) dynamite.place(target.gx, target.gy, target.gz);
       } else {
         const target = getPlacementTarget(event, orbit.camera, world, groundPlane);
         if (target) {
@@ -237,6 +249,7 @@ export default function VoxelGame() {
       animId = requestAnimationFrame(animate);
       const dt = Math.min(clock.getDelta(), 0.1); // cap dt to avoid large jumps
       characters.forEach(c => c.update(dt));
+      if (dynamite.update(dt, world)) setVoxelCount(world.count);
       renderer.render(scene, orbit.camera);
     }
     animate();
@@ -245,6 +258,7 @@ export default function VoxelGame() {
     return () => {
       cancelAnimationFrame(animId);
       characters.forEach(c => c.dispose(scene));
+      dynamite.dispose();
       window.removeEventListener('mousedown',   onMouseDown);
       window.removeEventListener('mousemove',   onMouseMove);
       window.removeEventListener('mouseup',     onMouseUp);
@@ -264,7 +278,9 @@ export default function VoxelGame() {
         voxelCount={voxelCount}
         activeColor={activeColor}
         colors={COLORS}
+        activeTool={activeTool}
         onColorSelect={(i) => { activeColorRef.current = i; setActiveColor(i); }}
+        onToolSelect={(tool) => { activeToolRef.current = tool; setActiveTool(tool); }}
         onGenerate={() => generateRef.current?.()}
       />
     </div>
